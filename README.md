@@ -1,15 +1,15 @@
-# Daily Crypt
+# Friend Guild
 
-**A daily time-attack dungeon, identical for everyone. Every ranked attempt costs $RAREFRIENDS: 20% is burned and
-80% funds the prize pool for the day's three fastest verified runs.** By [Fablizio](https://github.com/Fablizio).
-Rare Friends Vibeathon entry (Token Activity) built on FriendSDK v0.1.2. All RF is simulated in this prototype.
+**A guild-management game where Rare Friends work for each other. Hire real Friends as mercenaries: 70% of every
+fee goes to the hired Friend's own wallet, 20% is burned and 10% funds the season.** By [Fablizio](https://github.com/Fablizio).
+Rare Friends Vibeathon entry (Economy Potential) built on FriendSDK v0.1.2. All RF is simulated in this prototype.
 
-- **Play:** https://fablizio.github.io/daily-crypt/ (needs a wallet on Robinhood mainnet holding a hardwired Generations Friend)
-- **Game source, rules and controls:** [`games/daily-crypt/`](games/daily-crypt/README.md) · **Economy design:** [`ECONOMY.md`](games/daily-crypt/ECONOMY.md)
-- **Run locally:** `npm ci && npm run build && npm run dev:game -- games/daily-crypt`, then open http://localhost:4173
+- **Play:** https://fablizio.github.io/friend-guild/ (needs a wallet on Robinhood mainnet holding a hardwired Generations Friend)
+- **Game source, rules and controls:** [`games/friend-guild/`](games/friend-guild/README.md) · **Economy design:** [`ECONOMY.md`](games/friend-guild/ECONOMY.md)
+- **Run locally:** `npm ci && npm run build && npm run dev:game -- games/friend-guild`, then open http://localhost:4173
 
 This repository is a copy of [FriendSDK v0.1.2](https://github.com/spokesz/friendsdk) (Apache-2.0,
-see `LICENSE` and `NOTICE.md`) with the game added under `games/daily-crypt/`. The SDK itself is unchanged.
+see `LICENSE` and `NOTICE.md`) with the game added under `games/friend-guild/`. The SDK itself is unchanged.
 The original SDK documentation follows.
 
 ---
