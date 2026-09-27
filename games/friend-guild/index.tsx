@@ -16,7 +16,7 @@ import {
   baseFeeOf, emptyLedger, favoredFor, feeOf, makeMerc, mercFee, ratingOf, record, round1, runExpedition, splitFee, statsFor, successChance, upgradeCost,
   type ExpeditionResult, type Gear, type Ledger, type Merc, type Stats, type StatKey, type Zone,
 } from "./engine/guild";
-import { DEFAULT_PARAMS, simulateEconomy, type EconParams, type EconResult } from "./engine/econ";
+import { DEFAULT_PARAMS, SCENARIOS, runEconomy, scenarioParams, summarize, type EconParams, type EconRun, type ScenarioId } from "./engine/econ";
 import { SCENE_H, SCENE_W, drawLineChart, drawScene } from "./engine/scene";
 
 type Tab = "guild" | "tavern" | "expedition" | "workshop" | "economy";
@@ -46,6 +46,28 @@ function StatBars({ stats, bonus }: { stats: Stats; bonus?: Partial<Stats> }) {
     <i><b style={{ width: `${Math.min(100, (stats[key] / 14) * 100)}%` }} />{bonus?.[key] ? <b className="bonus" style={{ width: `${Math.min(100, (bonus[key]! / 14) * 100)}%` }} /> : null}</i>
     <em>{stats[key] + (bonus?.[key] ?? 0)}</em>
   </div>)}</div>;
+}
+
+/** Where RF goes: hire fees split three ways, workshop RF is burned, expeditions only make Shards. Text carries every label. */
+function FlowDiagram({ owner, burn, season }: { owner: number; burn: number; season: number }) {
+  return <figure className="fg-flow" aria-label="RF flows">
+    <figcaption>Where RF goes <span className="fg-sim">SIMULATED</span></figcaption>
+    <div className="fg-flow-row">
+      <span className="fg-node">Player</span><i aria-hidden="true">→</i>
+      <span className="fg-node">Hire fee (RF)</span><i aria-hidden="true">→</i>
+      <ul className="fg-flow-split" aria-label="The fee splits into">
+        <li className="fg-node owner">{owner}% → hired Friend's wallet</li>
+        <li className="fg-node burn">{burn}% → burned 🔥</li>
+        <li className="fg-node season">{season}% → season fund <i aria-hidden="true">→</i> weekly payout to top guilds</li>
+      </ul>
+    </div>
+    <div className="fg-flow-row">
+      <span className="fg-node">Expeditions</span><i aria-hidden="true">→</i>
+      <span className="fg-node shard">◆ Shards (never RF)</span><i aria-hidden="true">→</i>
+      <span className="fg-node">Workshop: ◆ + RF</span><i aria-hidden="true">→</i>
+      <span className="fg-node burn">100% of that RF burned 🔥</span>
+    </div>
+  </figure>;
 }
 
 function Chart({ title, values, color, format }: { title: string; values: readonly number[]; color: string; format: (v: number) => string }) {
@@ -98,7 +120,9 @@ export default function FriendGuild({ friendId, client, paused }: GameComponentP
   const [zoneIndex, setZoneIndex] = useState(0);
   const [run, setRun] = useState<Run | null>(null);
   const [econParams, setEconParams] = useState<EconParams>(DEFAULT_PARAMS);
-  const [econ, setEcon] = useState<EconResult | null>(null);
+  const [scenario, setScenario] = useState<ScenarioId | "custom">("baseline");
+  const [econRun, setEconRun] = useState<EconRun | null>(null);
+  const econ = econRun?.result ?? null;
   const [econBusy, setEconBusy] = useState(false);
   const live = useRef({ paused, menu, listed, me, mercs, reducedMotion });
   live.current = { paused, menu, listed, me, mercs, reducedMotion };
@@ -277,11 +301,18 @@ export default function FriendGuild({ friendId, client, paused }: GameComponentP
     if (paused) return;
     setEquipped(e => e.includes(id) ? e.filter(x => x !== id) : e.length < GEAR_SLOTS ? [...e, id] : e);
   };
-  const runEcon = () => {
+  const runEcon = (params = econParams, id = scenario) => {
     if (econBusy) return;
     setEconBusy(true);
-    setTimeout(() => { setEcon(simulateEconomy(econParams)); setEconBusy(false); }, 30);
+    setTimeout(() => { setEconRun(runEconomy(params, id)); setEconBusy(false); }, 30);
   };
+  const pickScenario = (id: ScenarioId) => {
+    if (paused || econBusy) return;
+    const params = scenarioParams(id, econParams.players);
+    setEconParams(params); setScenario(id); runEcon(params, id); sound("select");
+  };
+  /** A manual parameter change turns the preset into a custom run. */
+  const setParam = (patch: Partial<EconParams>) => { setEconParams(p => ({ ...p, ...patch })); setScenario("custom"); };
   useEffect(() => { if (tab === "economy" && !econ && !econBusy) runEcon(); });
 
   const board3 = [{ name: `Your guild`, fame, you: true }, ...rivals.map(r => ({ ...r, you: false }))].sort((a, b) => b.fame - a.fame);
@@ -430,30 +461,47 @@ export default function FriendGuild({ friendId, client, paused }: GameComponentP
         <div className="fg-card fg-params">
           <h3>Economy simulator <span className="fg-sim">SIMULATED</span></h3>
           <p className="fg-small">An agent-based model: players run expeditions, hire from 8-Friend boards by value for money, craft with Shards (burning RF), and fees rise with demand then fade.</p>
+          <div className="fg-scenarios" role="group" aria-label="Scenario presets">
+            <span>Scenarios</span>
+            {SCENARIOS.map(sc => <button key={sc.id} type="button" aria-pressed={scenario === sc.id} className={scenario === sc.id ? "on" : ""} title={sc.about}
+              disabled={paused || econBusy} onClick={() => pickScenario(sc.id)}>{sc.label}</button>)}
+          </div>
+          <p className="fg-small">{scenario === "custom" ? "Custom parameters." : `${SCENARIOS.find(sc => sc.id === scenario)!.label}: ${SCENARIOS.find(sc => sc.id === scenario)!.about}.`}</p>
           <div className="fg-controls">
             <label>Players <select value={econParams.players} disabled={paused} onChange={e => setEconParams(p => ({ ...p, players: Number(e.target.value) }))}>{[100, 1000, 5000].map(v => <option key={v} value={v}>{v}</option>)}</select></label>
-            <label>Expeditions/day <select value={econParams.expeditionsPerDay} disabled={paused} onChange={e => setEconParams(p => ({ ...p, expeditionsPerDay: Number(e.target.value) }))}>{[1, 2, 3, 4, 6].map(v => <option key={v} value={v}>{v}</option>)}</select></label>
-            <label>Burn % <select value={econParams.burnPct} disabled={paused} onChange={e => { const burn = Number(e.target.value); setEconParams(p => ({ ...p, burnPct: burn, ownerPct: Math.min(p.ownerPct, 100 - burn - p.seasonPct) })); }}>{[10, 15, 20, 25, 30, 40].map(v => <option key={v} value={v}>{v}</option>)}</select></label>
-            <label>To owner % <select value={econParams.ownerPct} disabled={paused} onChange={e => { const owner = Number(e.target.value); setEconParams(p => ({ ...p, ownerPct: owner, seasonPct: Math.max(0, 100 - owner - p.burnPct) })); }}>{[50, 60, 70, 80].filter(v => v + econParams.burnPct <= 100).map(v => <option key={v} value={v}>{v}</option>)}</select></label>
-            <label>Price step <select value={econParams.priceStep} disabled={paused} onChange={e => setEconParams(p => ({ ...p, priceStep: Number(e.target.value) }))}>{[0, 0.025, 0.05, 0.1].map(v => <option key={v} value={v}>+{v * 100}%</option>)}</select></label>
-            <button type="button" className="fg-primary" disabled={paused || econBusy} onClick={runEcon}>{econBusy ? "Simulating…" : "Run 30 days"}</button>
+            <label>Join %/day <select value={econParams.growthPct} disabled={paused} onChange={e => setParam({ growthPct: Number(e.target.value) })}>{[0, 0.5, 1, 2, 5, 7].map(v => <option key={v} value={v}>{v}</option>)}</select></label>
+            <label>Leave %/day <select value={econParams.churnPct} disabled={paused} onChange={e => setParam({ churnPct: Number(e.target.value) })}>{[0, 1, 2, 3.5, 5].map(v => <option key={v} value={v}>{v}</option>)}</select></label>
+            <label>Expeditions/day <select value={econParams.expeditionsPerDay} disabled={paused} onChange={e => setParam({ expeditionsPerDay: Number(e.target.value) })}>{[1, 2, 3, 4, 6].map(v => <option key={v} value={v}>{v}</option>)}</select></label>
+            <label>Whales <select value={econParams.whaleShare} disabled={paused} onChange={e => setParam({ whaleShare: Number(e.target.value) })}>{[0, 0.02, 0.05, 0.1].map(v => <option key={v} value={v}>{v * 100}% (×{econParams.whaleMult})</option>)}</select></label>
+            <label>Bots <select value={econParams.botShare} disabled={paused} onChange={e => setParam({ botShare: Number(e.target.value) })}>{[0, 0.02, 0.05, 0.1].map(v => <option key={v} value={v}>{v * 100}%</option>)}</select></label>
+            <label>Hire cap <select value={econParams.hireCap} disabled={paused} onChange={e => setParam({ hireCap: Number(e.target.value) })}>{[0, 1, 3, 5].map(v => <option key={v} value={v}>{v ? `${v}/Friend/day` : "none"}</option>)}</select></label>
+            <label>Burn % <select value={econParams.burnPct} disabled={paused} onChange={e => { const burn = Number(e.target.value); setParam({ burnPct: burn, ownerPct: Math.min(econParams.ownerPct, 100 - burn - econParams.seasonPct) }); }}>{[10, 15, 20, 25, 30, 40].map(v => <option key={v} value={v}>{v}</option>)}</select></label>
+            <label>To owner % <select value={econParams.ownerPct} disabled={paused} onChange={e => { const owner = Number(e.target.value); setParam({ ownerPct: owner, seasonPct: Math.max(0, 100 - owner - econParams.burnPct) }); }}>{[50, 60, 70, 80].filter(v => v + econParams.burnPct <= 100).map(v => <option key={v} value={v}>{v}</option>)}</select></label>
+            <label>Price step <select value={econParams.priceStep} disabled={paused} onChange={e => setParam({ priceStep: Number(e.target.value) })}>{[0, 0.025, 0.05, 0.1].map(v => <option key={v} value={v}>+{v * 100}%</option>)}</select></label>
+            <button type="button" className="fg-primary" disabled={paused || econBusy} onClick={() => runEcon()}>{econBusy ? "Simulating…" : "Run 30 days"}</button>
           </div>
-          <p className="fg-small">Split: {econParams.ownerPct}% owner · {econParams.burnPct}% burn · {100 - econParams.ownerPct - econParams.burnPct}% season.</p>
+          <p className="fg-small">Split: {econParams.ownerPct}% owner · {econParams.burnPct}% burn · {100 - econParams.ownerPct - econParams.burnPct}% season.{econParams.botShare > 0 ? ` Bots spend ${econParams.botBudget} RF a day each hiring their own Friend.` : ""}</p>
         </div>
+        <FlowDiagram owner={econParams.ownerPct} burn={econParams.burnPct} season={100 - econParams.ownerPct - econParams.burnPct} />
         {econ && <>
           <div className="fg-tiles">
             <div><small>RF spent</small><b>{Math.round(econ.totals.spent).toLocaleString("en-US")}</b></div>
             <div><small>RF burned 🔥</small><b className="burn">{Math.round(econ.totals.burned).toLocaleString("en-US")}</b></div>
             <div><small>RF to Friend owners</small><b>{Math.round(econ.totals.toOwners).toLocaleString("en-US")}</b></div>
+            <div><small>Avg listed Friend earns</small><b>{round1(econ.totals.perFriendPerDay)} RF/day</b><small>players spend {round1(econ.totals.spendPerPlayerDay)} RF/day</small></div>
+            <div><small>Active players</small><b>{econ.totals.playersStart.toLocaleString("en-US")} → {econ.totals.playersEnd.toLocaleString("en-US")}</b></div>
             <div><small>Top 10% of Friends' share</small><b>{Math.round((econ.days.at(-1)?.top10Share ?? 0) * 100)}%</b></div>
             <div><small>RF minted by the game</small><b>0 {econ.conserved ? "✓" : "✗"}</b></div>
           </div>
           <div className="fg-charts">
+            <Chart title="Active players" values={econ.days.map(d => d.players)} color="#eeeeea" format={compact} />
             <Chart title="RF burned per day" values={econ.days.map(d => d.burned)} color="#ff8a4c" format={compact} />
+            <Chart title="RF earned per listed Friend per day" values={econ.days.map(d => d.perFriend)} color="#ccff00" format={v => v < 100 ? v.toFixed(1) : compact(v)} />
             <Chart title="RF to owners, cumulative" values={econ.days.map(d => d.ownersTotal)} color="#ccff00" format={compact} />
             <Chart title="Average hire fee (RF)" values={econ.days.map(d => d.avgFee)} color="#6fd0ff" format={v => v.toFixed(1)} />
-            <Chart title="Shards in circulation" values={econ.days.map(d => d.shardsSupply)} color="#c9a7ff" format={compact} />
+            <Chart title="Shards held per active player" values={econ.days.map(d => d.shardsPerPlayer)} color="#c9a7ff" format={compact} />
           </div>
+          {econRun && <p className="fg-summary" role="status" aria-live="polite">{summarize(econRun)}</p>}
           <p className="fg-small">Conservation check: every RF spent ends up with a Friend owner, burned, or in the season fund ({econ.conserved ? "holds" : "FAILS"}). Shards are never redeemable for RF.</p>
         </>}
       </div>}
@@ -470,7 +518,7 @@ export default function FriendGuild({ friendId, client, paused }: GameComponentP
         <li><b>Every hire pays the hired Friend.</b> {SPLIT.owner}% of the fee goes to that Friend's own wallet, {SPLIT.burn}% is burned, and {SPLIT.season}% goes to the weekly season fund.</li>
         <li><b>List your Friend</b> and other guilds hire it too. Its fee follows its stats and rises with demand.</li>
         <li><b>Expeditions never create RF.</b> They bring Shards, fame and gear. Shards plus RF buy upgrades and gear in the Workshop, and that RF is burned.</li>
-        <li><b>Economy tab:</b> simulate 30 days of the whole economy and try other parameters.</li>
+        <li><b>Economy tab:</b> simulate 30 days of the whole economy, try scenario presets (bear market, hype, whales, bot attack) and other parameters. A diagram there shows where every RF goes.</li>
       </ul>
       <p className="fg-small">Prototype: all RF, balances, hires, other guilds and earnings are SIMULATED. No RF moves and no transaction is requested.</p>
       <button type="button" className="rf-frame-primary" disabled={paused} onClick={() => setMenu(null)}>Got it</button>

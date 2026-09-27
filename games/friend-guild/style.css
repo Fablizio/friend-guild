@@ -60,7 +60,22 @@ html, body, #root { margin: 0; height: 100%; background: #0b0b0c; overflow: hidd
 .fg-table { width: 100%; border-collapse: collapse; } .fg-table td { padding: .2em .3em; border-bottom: 1px solid #222; } .fg-table td:last-child { text-align: right; }
 .fg-econ { display: flex; flex-direction: column; gap: .7em; }
 .fg-controls { display: flex; flex-wrap: wrap; gap: .6em; align-items: flex-end; } .fg-controls label { display: flex; flex-direction: column; gap: .2em; font-size: .85em; color: #bdbdbd; }
-.fg-tiles { display: grid; grid-template-columns: repeat(5, 1fr); gap: .5em; }
+.fg-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(10.5em, 1fr)); gap: .5em; }
+.fg-tiles div small + b + small { margin-top: .15em; font-size: .8em; }
+.fg-scenarios { display: flex; flex-wrap: wrap; align-items: center; gap: .4em; margin: .4em 0 .2em; }
+.fg-scenarios > span { color: #bdbdbd; font-size: .85em; margin-right: .2em; }
+.fg-game .fg-scenarios button { border-width: 1px; padding: .3em .7em; }
+.fg-game .fg-scenarios button.on { background: #eeeeea; color: #000; }
+.fg-summary { margin: 0; padding: .55em .8em; background: #11140a; border-left: 4px solid #ccff00; color: #e6e6df; font-size: .9em; }
+.fg-flow { margin: 0; color: #eeeeea; background: #151516; border: 2px solid #262626; padding: .6em .8em; display: flex; flex-direction: column; gap: .5em; font-size: .85em; }
+.fg-flow figcaption { font-weight: bold; }
+.fg-flow-row { display: flex; align-items: center; flex-wrap: wrap; gap: .35em; }
+.fg-flow-row > i, .fg-flow-split i { font-style: normal; color: #8a8a8a; }
+.fg-node { display: inline-block; padding: .25em .5em; border: 1px solid #4a4a4a; background: #0e0e0e; color: #eeeeea; }
+.fg-node.owner { border-color: #ccff00; color: #ccff00; } .fg-node.burn { border-color: #ff8a4c; color: #ff8a4c; }
+.fg-node.season { border-color: #6fd0ff; color: #6fd0ff; } .fg-node.shard { border-color: #c9a7ff; color: #c9a7ff; }
+.fg-flow-split { list-style: none; margin: 0; padding: 0 0 0 .5em; border-left: 2px solid #4a4a4a; display: flex; flex-direction: column; gap: .25em; }
+
 .fg-charts { display: grid; grid-template-columns: 1fr 1fr; gap: .6em; }
 .fg-chart { margin: 0; background: #151516; border: 2px solid #262626; padding: .5em; }
 .fg-chart figcaption { display: flex; justify-content: space-between; gap: .5em; font-size: .85em; margin-bottom: .2em; } .fg-chart figcaption span { color: #bdbdbd; }
@@ -74,6 +89,6 @@ html, body, #root { margin: 0; height: 100%; background: #0b0b0c; overflow: hidd
 @media (max-width: 620px) {
   .fg-grid2, .fg-charts { grid-template-columns: 1fr; }
   .fg-mercs, .fg-zones { grid-template-columns: repeat(2, 1fr); }
-  .fg-tiles { grid-template-columns: repeat(3, 1fr); }
+  .fg-tiles { grid-template-columns: repeat(2, 1fr); }
   .fg-logo.small { display: none; }
 }

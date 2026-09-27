@@ -69,6 +69,10 @@ try {
     await game.getByRole("tab", { name: /^Guild/ }).waitFor({ timeout: 20000 });
     await page.waitForTimeout(3500);
     await shot("guild");
+    await game.getByRole("button", { name: "Help" }).click();
+    await game.getByText(/A diagram there shows where every RF goes/).waitFor();
+    await shot("help");
+    await game.getByRole("button", { name: "Close How Friend Guild works" }).click();
     await game.getByRole("tab", { name: /^Tavern/ }).click();
     await game.getByRole("button", { name: /^Hire · / }).first().click();
     await game.getByRole("button", { name: /^Hire · / }).first().click();
@@ -84,7 +88,18 @@ try {
     await shot("workshop");
     await game.getByRole("tab", { name: /^Economy/ }).click();
     await game.getByText("RF minted by the game").waitFor({ timeout: 15000 });
+    assert.ok(await game.locator(".fg-flow").getByText("20% → burned").isVisible(), "RF flow diagram in the Economy tab");
     await shot("economy");
+    await game.locator(".fg-summary").getByText(/^Baseline: 1,000 players/).waitFor({ timeout: 15000 });
+    await game.getByRole("button", { name: "Bot attack" }).click();
+    await game.locator(".fg-summary").getByText(/^Bot attack: \d+ bots made/).waitFor({ timeout: 20000 });
+    assert.equal(await game.getByRole("button", { name: "Bot attack" }).getAttribute("aria-pressed"), "true");
+    await game.locator(".fg-charts").scrollIntoViewIfNeeded();
+    await shot("economy-charts");
+    await game.locator(".fg-summary").scrollIntoViewIfNeeded();
+    await shot("economy-bots");
+    await game.getByRole("button", { name: "Hype" }).click();
+    await game.locator(".fg-summary").getByText(/^Hype: players/).waitFor({ timeout: 20000 });
     assert.deepEqual([...new Set([...errors, ...fixture.errors])], [], `${view.name}: browser errors`);
     await context.close();
   }

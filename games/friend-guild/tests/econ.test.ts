@@ -1,6 +1,6 @@
 // Economy model and fee-split checks. Run from the repo root: node games/friend-guild/tests/run-econ.mjs
 import assert from "node:assert/strict";
-import { simulateEconomy } from "../engine/econ";
+import { DEFAULT_PARAMS, SCENARIOS, runEconomy, scenarioParams, simulateEconomy, summarize } from "../engine/econ";
 import { splitFee, feeOf, baseFeeOf, record, emptyLedger, successChance, favoredFor, type Zone } from "../engine/guild";
 
 let passed = 0;
@@ -46,5 +46,61 @@ test("shard supply stays bounded (the workshop sink keeps pace)", () => {
   const r = simulateEconomy({ players: 500 });
   const d10 = r.days[9].shardsSupply, d30 = r.days[29].shardsSupply;
   assert.ok(d30 < d10 * 1.25, `supply ${d10} → ${d30}`);
+});
+const conserves = (r: ReturnType<typeof simulateEconomy>) =>
+  r.conserved && Math.abs(r.totals.spent - (r.totals.toOwners + r.totals.burned + r.totals.season)) < 1e-6 * r.totals.spent;
+test("growth and churn keep RF conserved, move the player count and resize the listed pool", () => {
+  const grow = simulateEconomy({ players: 400, growthPct: 6, churnPct: 1 });
+  const shrink = simulateEconomy({ players: 400, growthPct: 0, churnPct: 4 });
+  for (const r of [grow, shrink]) assert.ok(conserves(r));
+  assert.ok(grow.totals.playersEnd > 400 * 3, `grew to ${grow.totals.playersEnd}`);
+  assert.ok(shrink.totals.playersEnd < 400 * 0.4, `shrank to ${shrink.totals.playersEnd}`);
+  const listed = (r: typeof grow, i: number) => r.days[i].listed / r.days[i].players;
+  assert.ok(Math.abs(listed(grow, 29) - 0.8) < 0.01 && Math.abs(listed(shrink, 29) - 0.8) < 0.05, "listed pool tracks 80% of players");
+  assert.deepEqual(simulateEconomy({ players: 300, growthPct: 5, churnPct: 3, seed: 9 }).totals, simulateEconomy({ players: 300, growthPct: 5, churnPct: 3, seed: 9 }).totals);
+});
+test("new players start with no Shards and churned players take theirs out of circulation", () => {
+  const r = simulateEconomy({ players: 300, growthPct: 0, churnPct: 5 });
+  let supply = 0;
+  for (const d of r.days) { supply += d.shardsMinted - d.shardsSunk - d.shardsLost; assert.ok(Math.abs(supply - d.shardsSupply) < 1e-6); }
+  assert.ok(r.days.slice(1).every(d => d.shardsLost > 0));
+  const hype = simulateEconomy({ players: 300, growthPct: 15, churnPct: 0 });
+  assert.ok(hype.days[29].shardsPerPlayer < simulateEconomy({ players: 300, growthPct: 0, churnPct: 0 }).days[29].shardsPerPlayer, "fresh players dilute Shards per player");
+});
+test("every scenario preset runs, conserves RF and explains itself with its numbers", () => {
+  for (const s of SCENARIOS) {
+    const run = runEconomy(scenarioParams(s.id, 300), s.id);
+    assert.ok(conserves(run.result), s.id);
+    const line = summarize(run);
+    assert.ok(line.startsWith(s.label) && /\d/.test(line) && !line.includes("NaN") && !line.includes("Infinity"), line);
+  }
+  const bear = runEconomy(scenarioParams("bear", 300), "bear").result, hype = runEconomy(scenarioParams("hype", 300), "hype").result;
+  assert.ok(bear.totals.playersEnd < 300 && hype.totals.playersEnd > 300);
+  assert.equal(summarize({ ...runEconomy({ ...DEFAULT_PARAMS, players: 100 }) }).split(":")[0], "Custom");
+});
+test("bot attack: self-hiring is net-negative for the attackers", () => {
+  const { result } = runEconomy(scenarioParams("bots", 1000), "bots"), w = result.wash;
+  assert.ok(w.bots === 50 && w.hires > 0);
+  assert.ok(conserves(result));
+  // Each self-hire returns only the owner share: the burn and season shares are lost on every fee.
+  assert.ok(Math.abs(w.returned - w.spent * 0.7) < 1e-6 * w.spent);
+  assert.ok(Math.abs(w.spent - w.returned - (w.burned + w.season)) < 1e-6 * w.spent);
+  assert.ok(w.spent - w.returned > 0.29 * w.spent);
+  // Pumping their own price also costs them real hires compared with an average Friend.
+  assert.ok(w.organicPerBotFriendDay < w.organicPerOtherFriendDay, `${w.organicPerBotFriendDay} vs ${w.organicPerOtherFriendDay}`);
+});
+test("the hire cap limits wash volume", () => {
+  const base = { ...scenarioParams("bots", 600) };
+  const none = simulateEconomy({ ...base, hireCap: 0 }), three = simulateEconomy({ ...base, hireCap: 3 }), one = simulateEconomy({ ...base, hireCap: 1 });
+  assert.ok(three.wash.hires <= three.wash.bots * 3 * 30 && one.wash.hires <= one.wash.bots * 30);
+  assert.ok(one.wash.hires < three.wash.hires && three.wash.hires < none.wash.hires * 0.5, `${one.wash.hires} < ${three.wash.hires} < ${none.wash.hires}`);
+  assert.ok(three.wash.capHits > 0 && none.wash.capHits === 0);
+  const run = runEconomy(base, "bots");
+  assert.equal(run.uncapped?.wash.hires, none.wash.hires);
+});
+test("whales run more expeditions and spend a larger share than their headcount", () => {
+  const r = simulateEconomy(scenarioParams("whales", 1000)), t = r.totals;
+  assert.ok(t.whaleDays > 0 && t.whaleSpent / t.spent > 2 * (t.whaleDays / t.playerDays));
+  assert.ok(r.days[29].top10Share < 0.5);
 });
 console.log(`# pass ${passed}`);
