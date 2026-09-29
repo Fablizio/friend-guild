@@ -4,7 +4,7 @@
 
 <sub>Demo recorded with the SDK test fixtures (mock wallet and sample artwork), so the tavern Friends share two sample sprites. The public preview reads real Friends.</sub>
 
-Builder: Fablizio · [GitHub @Fablizio](https://github.com/Fablizio) · [X @FabrizioCottone](https://x.com/FabrizioCottone) · [Telegram @Fablizio](https://t.me/Fablizio) · FriendSDK **v0.1.2** · Rare Friends Vibeathon (**Economy Potential**)
+Builder: Fablizio · [GitHub @Fablizio](https://github.com/Fablizio) · [X @FabrizioCottone](https://x.com/FabrizioCottone) · [Telegram @Fablizio](https://t.me/Fablizio) · FriendSDK **v0.1.4** · Rare Friends Vibeathon (**Economy Potential**)
 
 A guild-management game where Rare Friends work for each other. Your verified Generations Friend runs a guild and
 hires real Friends as mercenaries for expeditions. **Every fee pays the hired Friend's own wallet (70%), burns 20%

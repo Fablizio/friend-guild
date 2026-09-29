@@ -99,7 +99,7 @@ the same Friend in a day, which caps the stats a bot can farm (hire counts) rega
 
 ## Going live (later phase, with the Rare Friends team)
 
-Needs custom integration beyond FriendSDK v0.1.2, which has no hire, listing, extra-currency or persistence APIs:
+Needs custom integration beyond FriendSDK v0.1.4, which has no hire, listing, extra-currency or persistence APIs:
 
 - **GuildHire contract** (RF and Generations through interfaces):
   - `list(friendId, on)` is callable by the Friend's owner;
