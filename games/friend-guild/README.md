@@ -42,6 +42,17 @@ hiring but never mandatory. Holding rarer Friends pays.
   higher power. See [ECONOMY.md](ECONOMY.md#generation-sets-the-value).
 - Genesis NFTs are a separate collection that FriendSDK v0.1.4 cannot select as a player; a Genesis tier is on the roadmap.
 
+## Relation to the protocol's 50/50 rule
+
+The Rare Friends protocol splits activation, hardwire, promote and upgrade payments 50% burned / 50% RF rewards for
+Friends' NFT wallets ([source](https://iq.wiki/en/wiki/rare-friends)). Friend Guild's hire fee is 70% to the hired
+Friend's own wallet, 20% burned and 10% to the season fund, because a hire is a service paid to one specific Friend,
+so its wallet gets the largest share (protocol upgrades are paid to the protocol, not to one Friend). Workshop RF is
+100% burned. A **protocol-aligned variant** (50% to the hired Friend's wallet, 50% burned), run with the model's split
+parameters on the same Baseline: 2,509,709 RF spent, 1,419,482 burned (56.6%, vs 765,347 / 30.5% by default) and
+1,090,226 to Friend owners (43.4%, vs 1,526,317 / 60.8%). The default stays 70/20/10. Details:
+[ECONOMY.md](ECONOMY.md#relation-to-the-protocols-5050-rule).
+
 ## Run it
 
 From the repository root (Node.js 22+):

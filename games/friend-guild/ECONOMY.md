@@ -56,6 +56,36 @@ to hold rarer Friends. Expedition power grows by only a quarter of the fee premi
   of "prestige" picks favour its higher power.
 - Genesis NFTs are a separate collection that FriendSDK v0.1.4 cannot select as a player; a Genesis tier is on the roadmap.
 
+## Relation to the protocol's 50/50 rule
+
+The Rare Friends protocol splits activation, hardwire, promote and upgrade payments evenly: "50% of the RF is burned
+and 50% becomes RF rewards" for Friends' NFT wallets ([source](https://iq.wiki/en/wiki/rare-friends)). Friend Guild
+splits a hire fee 70/20/10 (`SPLIT` in `engine/guild.ts`): **70% to the hired Friend's own wallet, 20% burned, 10% to
+the season fund** (paid weekly to the top guilds). Workshop RF (upgrades and gear) is 100% burned.
+
+**Why the difference.** A protocol upgrade is paid to the protocol, and its rewards are shared across the Friends. A
+hire is a service bought from one specific Friend, so that Friend's wallet gets the largest share, the way a
+marketplace pays the seller. The burn keeps every hire deflationary, and the season share rewards guild play.
+
+**Protocol-aligned variant (not the default).** The model's split parameters (`ownerPct`, `burnPct`, `seasonPct`)
+run the same Baseline with 50% to the hired Friend's wallet and 50% burned (season 0%). 1,000 players, 30 days,
+seed 42:
+
+| Baseline | Default 70/20/10 | Protocol-aligned 50/50 |
+| --- | ---: | ---: |
+| RF spent | 2,509,709 | 2,509,709 |
+| RF burned (share of spend) | 765,347 (30.5%) | 1,419,482 (56.6%) |
+| RF to Friend owners (share) | 1,526,317 (60.8%) | 1,090,226 (43.4%) |
+| Season fund | 218,045 | 0 |
+| Average listed Friend earns | 63.6 RF/day | 45.4 RF/day |
+| Gen 1 vs Gen 6 listed Friend earns | 198.1 vs 55.6 RF/day | 141.5 vs 39.7 RF/day |
+
+The model's players don't react to the split, so spend and hires are identical and only the destination of RF
+changes. The 50/50 variant burns almost twice as much and pays holders about 29% less. Wash trading gets costlier
+too: a self-hire would lose 50% instead of 30%. The default stays 70/20/10. The exact 50/50 runs through `simulateEconomy`
+(the Economy tab's selectors stop at 40% burn). The closest in-game setting, Burn % 40 (50% owner, 40% burn, 10%
+season), gives 1,201,437 RF burned (47.9%) and the same 1,090,226 RF to owners.
+
 ## Flows
 
 The diagram above (also drawn in the game's Economy tab):
