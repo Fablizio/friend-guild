@@ -2,24 +2,30 @@
  * Picks the dungeon's inhabitants: real Rare Friends token IDs, with their canonical artwork read from the
  * SDK's pinned sprite registry on Robinhood mainnet.
  *
- * Only the public artwork registry is read (familyOf / seedOf / frames). The Generations collection is never
- * scanned, no owners are looked up and no wallet is involved. Ownership of the *player's* Friend is verified
+ * The public artwork registry is read (familyOf / seedOf / frames), plus one read-only `generation(id)` per
+ * chosen Friend on the Generations contract (tier pricing). The collection is never scanned, no owners are looked
+ * up and no wallet is involved. Ownership of the *player's* Friend is verified
  * by the SDK runtime before this component mounts.
  */
 import { createPublicClient, http, type Address } from "viem";
 import {
   FAMILIES_REGISTRY_ABI, GENERATION_SPRITE_MANIFEST as M, decodeGenerationSprites, type GenerationSprites,
 } from "@rarefriends/friendsdk/sprites";
+import { GENERATION_ELIGIBILITY_ABI } from "@rarefriends/friendsdk/identity";
 import type { Rng } from "./rng";
 import type { FamilyId } from "./themes";
 
-/** Hardwired Generations Friends live in this ID range (higher IDs are Generation 0). */
+/** The cast is sampled from IDs 1–100,000. Hardwired Friends also exist above this range (e.g. #332833 is Gen 6). */
 export const MAX_FRIEND_ID = 100_000;
 const MULTICALL3 = "0xcA11bde05977b3631167028862bE2a173976CA11" as Address;
 const SAMPLE = 120;
 
 export type FloorCast = Readonly<{ family: FamilyId; regulars: readonly GenerationSprites[]; boss: GenerationSprites }>;
-export type Roster = Readonly<{ floors: readonly FloorCast[]; sampled: number }>;
+export type Roster = Readonly<{
+  floors: readonly FloorCast[]; sampled: number;
+  /** Generation of each cast Friend (1 = rarest). null = unknown or failed read, which prices as ×1. */
+  generations: ReadonlyMap<bigint, number | null>;
+}>;
 
 let client: ReturnType<typeof makeClient> | null = null;
 function makeClient() {
@@ -64,6 +70,39 @@ async function readMany<T>(calls: readonly Call[], chunk = 60): Promise<(T | nul
     await Promise.all(missing.slice(start, start + 6).map(async i => { out[i] = await readOne<T>(calls[i]); }));
   }
   return out;
+}
+
+const validGeneration = (value: unknown) => {
+  const generation = Number(value);
+  return Number.isInteger(generation) && generation >= 1 && generation <= 255 ? generation : null;
+};
+const withTimeout = <T>(promise: Promise<T>, ms: number, fallback: T) =>
+  Promise.race([promise.catch(() => fallback), new Promise<T>(resolve => setTimeout(() => resolve(fallback), ms))]);
+
+/**
+ * Generations of the given Friends, batched through Multicall3 in chunks (cheap view reads). Best effort: any
+ * failed or slow read comes back as null (priced ×1), so it can never block the roster.
+ */
+export async function readGenerations(ids: readonly bigint[], chunk = 60, timeoutMs = 8000): Promise<Map<bigint, number | null>> {
+  const out = new Map<bigint, number | null>(ids.map(id => [id, null]));
+  const parts: bigint[][] = [];
+  for (let start = 0; start < ids.length; start += chunk) parts.push(ids.slice(start, start + chunk));
+  await Promise.all(parts.map(async part => {
+    const contracts = part.map(id => ({ address: M.generations, abi: GENERATION_ELIGIBILITY_ABI, functionName: "generation", args: [id] })) as never[];
+    const results = await withTimeout(rpc().multicall({ contracts, allowFailure: true, multicallAddress: MULTICALL3 }), timeoutMs, null);
+    results?.forEach((result, i) => { if (result.status === "success") out.set(part[i], validGeneration(result.result)); });
+  }));
+  return out;
+}
+
+/**
+ * The player's own Friend's generation (1 = rarest), read once from the Generations contract. Best effort:
+ * null on any failure or timeout, which prices as ×1.
+ */
+export async function readGeneration(tokenId: bigint, timeoutMs = 8000): Promise<number | null> {
+  const read = rpc().readContract({ address: M.generations, abi: GENERATION_ELIGIBILITY_ABI, functionName: "generation", args: [tokenId] })
+    .then(validGeneration);
+  return withTimeout(read, timeoutMs, null);
 }
 
 async function assertChain() {
@@ -125,5 +164,7 @@ export async function loadRoster(rng: Rng, playerId: bigint | null, playerFamily
     const boss = cast[cast.length - 1];
     return { family, boss, regulars: cast.slice(0, -1) };
   });
-  return { floors, sampled: sample.length };
+  const castIds = [...new Set(floors.flatMap(floor => [...floor.regulars, floor.boss].map(friend => friend.tokenId)))];
+  const generations = await readGenerations(castIds).catch(() => new Map<bigint, number | null>());
+  return { floors, sampled: sample.length, generations };
 }

@@ -23,6 +23,39 @@ Every hardwired Generations Friend has its own canonical wallet. Friend Guild gi
 players **hire the Friend** as a mercenary, and the fee is paid **to the Friend's wallet**. Holders earn from real
 demand for their Friend, not from emissions.
 
+## Generation sets the value
+
+In-game value follows market value. Rare Friends' market prices generations very differently (Gen 1 around $300,
+Gen 6 around $0.05), so a Friend's generation, read on chain with `generation(id)` on the Generations contract,
+multiplies its base hire fee. Its wallet earns in step with what the Friend is worth, which gives holders a reason
+to hold rarer Friends. Expedition power grows by only a quarter of the fee premium
+(`power × (1 + (mult − 1) × 0.25)`), so a rare mercenary is worth hiring but never mandatory.
+
+| Generation | Tier | Fee × (wallet earnings per hire ×) | Expedition power × |
+| --- | --- | ---: | ---: |
+| Gen 1 | Legendary | 3 | 1.5 |
+| Gen 2 | Epic | 2 | 1.25 |
+| Gen 3 | Rare | 1.5 | 1.125 |
+| Gen 4 | Uncommon | 1.25 | 1.0625 |
+| Gen 5 | Common | 1.1 | 1.025 |
+| Gen 6+ | Standard | 1 | 1 |
+| Unknown / failed read | "Gen ?" | 1 | 1 |
+
+- The multiplier only sets the base fee: the 70/20/10 split, demand pricing (`1.05^h`) and RF conservation are
+  unchanged. The player's own Friend is priced the same way when other guilds hire it.
+- Reads are batched through Multicall3 for the tavern cast, plus one read for the player's Friend. They are best
+  effort: a failed read never blocks the tavern and prices that Friend ×1. The collection is never scanned and no
+  owners are looked up.
+- Simulator, Baseline (1,000 players, 30 days, seed 42): a listed Friend earns per day, from real hires,
+
+  | Gen 1 | Gen 2 | Gen 3 | Gen 4 | Gen 5 | Gen 6 |
+  | ---: | ---: | ---: | ---: | ---: | ---: |
+  | 198.1 RF | 117.1 RF | 87.3 RF | 70.3 RF | 60.4 RF | 55.6 RF |
+
+  A Gen 1 wallet gets exactly 3× a Gen 6's per hire at equal demand, and about 3.5× over 30 days, because the 10%
+  of "prestige" picks favour its higher power.
+- Genesis NFTs are a separate collection that FriendSDK v0.1.4 cannot select as a player; a Genesis tier is on the roadmap.
+
 ## Flows
 
 The diagram above (also drawn in the game's Economy tab):
@@ -35,9 +68,9 @@ The diagram above (also drawn in the game's Economy tab):
 
 ## Pricing
 
-- **Base fee:** `1 + 0.22 × rating` RF. Rating is the sum of four stats set by family and seed, plus gear.
+- **Base fee:** `(1 + 0.22 × rating) × generation multiplier` RF. Rating is the sum of four stats set by family and seed, plus gear. The multiplier is Gen 1 ×3 … Gen 6 ×1 (see above).
 - **Demand multiplier:** `1.05^h`, where `h` is the hires still in the demand window. It decays continuously: half-life of 1 day in production, 2 minutes on the demo clock.
-- **Why dynamic pricing:** popular Friends get pricier, which pushes players to cheaper alternatives. In the simulator this spreads earnings across the collection: the top 10% of Friends take about 15% of owner earnings with default settings. It also makes self-hiring expensive: every self-hire raises the price of the next one.
+- **Why dynamic pricing:** popular Friends get pricier, which pushes players to cheaper alternatives. In the simulator this spreads earnings across the collection: the top 10% of Friends take about 18% of owner earnings with default settings (generation pricing included). It also makes self-hiring expensive: every self-hire raises the price of the next one.
 - **Affinity:** each zone favours two counter-families, so no single family is best everywhere. Demand follows the rotating zones.
 - **Gear:** crafting burns RF and raises your Friend's rating, and with it the fee other guilds pay. It's a player-funded investment in your own Friend's earning power.
 
@@ -55,17 +88,18 @@ The diagram above (also drawn in the game's Economy tab):
 
 | Metric | Value |
 | --- | ---: |
-| RF spent | ≈ 2.25M |
-| RF burned | ≈ 713K (hire burns plus workshop burns) |
-| RF to Friend owners | ≈ 1.34M |
-| Average listed Friend earns | ≈ 56 RF/day (an average player spends ≈ 75 RF/day) |
-| Average fee, day 1 → day 30 | 7.7 → 10.9 RF (demand settles) |
-| Top 10% of Friends' share of owner earnings | ≈ 15% |
+| RF spent | ≈ 2.51M |
+| RF burned | ≈ 765K (hire burns plus workshop burns) |
+| RF to Friend owners | ≈ 1.53M |
+| Average listed Friend earns | ≈ 64 RF/day (an average player spends ≈ 84 RF/day) |
+| Gen 1 vs Gen 6 listed Friend earns | ≈ 198 vs 56 RF/day |
+| Average fee, day 1 → day 30 | 8.7 → 12.4 RF (demand settles) |
+| Top 10% of Friends' share of owner earnings | ≈ 18% |
 | Shards held per active player | levels off at about 115 |
 | RF minted by the game | **0** (conservation check passes) |
 
 Absolute volumes scale with player count and the fee level, which is a launch parameter. The ratios are what
-matter: about a third of all RF spent is burned, and about 60% goes to holders.
+matter: about 30% of all RF spent is burned, and about 60% goes to holders.
 
 ## Scenarios
 
@@ -74,11 +108,11 @@ runs 30 days, and prints a one-line reading computed from the results. Numbers f
 
 | Preset | Parameters | Result (as printed in the game) |
 | --- | --- | --- |
-| Baseline | defaults | 713,375 RF burned (32% of all RF spent); an average listed Friend earned 56 RF/day. |
-| Bear market | 0.5% join, 3.5% leave per day (net −3%), 2 expeditions a day | Players 1,000 → 413; daily burn peaked at 12,946 RF on day 5, then fell to 6,314 by day 30 (−51%). The listed pool shrinks with players, so a listed Friend still earns 31.4 → 32 RF/day (day 7 → 30). |
-| Hype | 7% join, 2% leave per day (net +5%) | Players 1,000 → 4,115; daily burn 30,981 RF on day 7 → 96,351 on day 30. New players arrive with no Shards, yet a listed Friend still earns 54.7 RF/day. |
-| Whales | 5% of players run 4× more expeditions | 5% of players spent 17% of all RF; the top 10% of Friends took 14% of owner earnings; 69.3 RF/day per listed Friend. |
-| Bot attack | 5% of guilds are bots spending 150 RF/day hiring their own Friend; hire cap 3 per Friend per day | 50 bots made 4,500 self-hires, spent 58,537 RF and lost 30% of it (11,707 RF burned, 5,854 RF to the season). Their pumped price cut real hires of their Friends by 17% vs an average Friend. Without the cap: 12,922 self-hires costing 209,658 RF (the cap cuts wash volume 65%). |
+| Baseline | defaults | 765,347 RF burned (30% of all RF spent); an average listed Friend earned 63.6 RF/day. |
+| Bear market | 0.5% join, 3.5% leave per day (net −3%), 2 expeditions a day | Players 1,000 → 413; daily burn peaked at 13,825 RF on day 5, then fell to 6,691 by day 30 (−52%). The listed pool shrinks with players, so a listed Friend still earns 35.7 → 36.3 RF/day (day 7 → 30). |
+| Hype | 7% join, 2% leave per day (net +5%) | Players 1,000 → 4,115; daily burn 33,400 RF on day 7 → 104,112 on day 30. New players arrive with no Shards, yet a listed Friend still earns 62.4 RF/day. |
+| Whales | 5% of players run 4× more expeditions | 5% of players spent 16% of all RF; the top 10% of Friends took 18% of owner earnings; 77.7 RF/day per listed Friend. |
+| Bot attack | 5% of guilds are bots spending 150 RF/day hiring their own Friend; hire cap 3 per Friend per day | 50 bots made 4,500 self-hires, spent 65,389 RF and lost 30% of it (13,078 RF burned, 6,539 RF to the season). Their pumped price cut real hires of their Friends by 17% vs an average Friend. Without the cap: 12,229 self-hires costing 208,734 RF (the cap cuts wash volume 63%). |
 
 **Reading the bot attack.** A self-hire returns only the owner's 70%: the 20% burn and 10% season share are lost on
 every fee, so wash trading is always net-negative for the attacker. It also backfires: each self-hire raises the
@@ -116,6 +150,11 @@ Needs custom integration beyond FriendSDK v0.1.4, which has no hire, listing, ex
 ## Assumptions (stated, tunable)
 
 - Hiring behaviour: value for money with noise, 10% prestige picks, 8-Friend boards.
+- **Generation mix (assumed):** listed Friends are Gen 1 1%, Gen 2 3%, Gen 3 6%, Gen 4 12%, Gen 5 28%, Gen 6 50%
+  (skewed toward Gen 5–6, like the market). Value for money is judged against the tier's fair price (a Gen 1 at ×3
+  is as good a deal as a Gen 6 at ×1), so the generation changes what each hire pays, not how often a Friend is
+  hired; prestige picks weigh rating × expedition power. If players valued only power, rare Friends would be hired
+  less often: the multipliers are launch parameters to tune.
 - Shards: 20–40 per expedition, half of the balance spent daily in the workshop.
 - Demand halves daily. Listed Friends = 80% of players: the listed pool grows and shrinks with the player count
   (new holders list new Friends; when players leave, random Friends are delisted).

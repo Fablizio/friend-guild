@@ -50,14 +50,36 @@ export const baseFeeOf = (rating: number) => Math.round((1 + rating * 0.22) * 10
 export const feeOf = (baseFee: number, demand: number) => Math.round(baseFee * (1 + PRICE_STEP) ** demand * 10) / 10;
 export const round1 = (value: number) => Math.round(value * 10) / 10;
 
+/**
+ * Generation sets the value. A Friend's generation (1 = rarest, read on chain) scales its hire fee, so the hired
+ * Friend's wallet earns in step with its market value, and scales its expedition power more gently, so rare
+ * mercenaries are worth hiring but never mandatory. Unknown or failed reads count as ×1 ("Gen ?").
+ */
+export type GenTier = Readonly<{ gen: number | null; name: string; mult: number }>;
+export const GEN_TIERS: readonly GenTier[] = [
+  { gen: 1, name: "Legendary", mult: 3 }, { gen: 2, name: "Epic", mult: 2 }, { gen: 3, name: "Rare", mult: 1.5 },
+  { gen: 4, name: "Uncommon", mult: 1.25 }, { gen: 5, name: "Common", mult: 1.1 }, { gen: 6, name: "Standard", mult: 1 },
+];
+export const UNKNOWN_TIER: GenTier = { gen: null, name: "Unknown", mult: 1 };
+export function tierOf(gen: number | null | undefined): GenTier {
+  if (gen === null || gen === undefined || !Number.isInteger(gen) || gen < 1 || gen > 255) return UNKNOWN_TIER;
+  return gen >= 6 ? { gen, name: "Standard", mult: 1 } : GEN_TIERS[gen - 1];
+}
+export const tierLabel = (tier: GenTier) => tier.gen === null ? "GEN ? · ×1" : `GEN ${tier.gen} · ${tier.name.toUpperCase()} ×${tier.mult}`;
+/** Expedition power grows by a quarter of the fee premium: Gen 1 (×3 fee) gets ×1.5 power. */
+export const POWER_SHARE = 0.25;
+export const powerMult = (mult: number) => 1 + (mult - 1) * POWER_SHARE;
+/** Base fee scaled by the tier multiplier (before demand pricing). */
+export const tierFeeOf = (rating: number, mult: number) => round1(baseFeeOf(rating) * mult);
+
 export type Merc = {
-  sprites: GenerationSprites; id: bigint; family: FamilyId; stats: Stats; rating: number; baseFee: number;
+  sprites: GenerationSprites; id: bigint; family: FamilyId; stats: Stats; rating: number; baseFee: number; tier: GenTier;
   /** Hires still inside the demand window (decays continuously). */
   demand: number; hiresTotal: number; earned: number;
 };
-export function makeMerc(sprites: GenerationSprites): Merc {
-  const stats = statsFor(sprites), rating = ratingOf(stats);
-  return { sprites, id: sprites.tokenId, family: sprites.familyId as FamilyId, stats, rating, baseFee: baseFeeOf(rating), demand: 0, hiresTotal: 0, earned: 0 };
+export function makeMerc(sprites: GenerationSprites, generation: number | null = null): Merc {
+  const stats = statsFor(sprites), rating = ratingOf(stats), tier = tierOf(generation);
+  return { sprites, id: sprites.tokenId, family: sprites.familyId as FamilyId, stats, rating, baseFee: tierFeeOf(rating, tier.mult), tier, demand: 0, hiresTotal: 0, earned: 0 };
 }
 export const mercFee = (merc: Merc) => feeOf(merc.baseFee, merc.demand);
 
@@ -77,11 +99,14 @@ export type Zone = { family: FamilyId; tier: number; favored: readonly FamilyId[
 /** A zone favours two families that counter its natives, so no single family is best everywhere. */
 export const favoredFor = (family: FamilyId): FamilyId[] => [((family + 3) % 9) as FamilyId, ((family + 5) % 9) as FamilyId];
 
-export function teamPower(members: readonly Stats[]) {
-  return members.reduce((sum, s) => sum + s.power * 1.2 + s.guard + s.speed * 0.8 + s.luck * 0.6, 0);
+/** A team member: stats, family and (optionally) its generation tier multiplier. */
+export type Member = { stats: Stats; family: FamilyId; mult?: number };
+export const memberPower = (s: Stats, mult = 1) => (s.power * 1.2 + s.guard + s.speed * 0.8 + s.luck * 0.6) * powerMult(mult);
+export function teamPower(members: readonly Member[]) {
+  return members.reduce((sum, m) => sum + memberPower(m.stats, m.mult), 0);
 }
-export function successChance(zone: Zone, members: readonly { stats: Stats; family: FamilyId }[], guildLevel: number) {
-  const power = teamPower(members.map(m => m.stats));
+export function successChance(zone: Zone, members: readonly Member[], guildLevel: number) {
+  const power = teamPower(members);
   const affinity = members.filter(m => zone.favored.includes(m.family)).length;
   const kin = members.filter(m => m.family === 2).length ? 0.03 * (members.length - 1) : 0; // Family: team player
   const chance = 0.5 + (power - zone.req) * 0.018 + (guildLevel - 1) * 0.03 + affinity * 0.07 + kin;
@@ -94,7 +119,7 @@ export type ExpeditionResult = {
 };
 
 /** Browser randomness is presentation only here: expeditions never pay RF. */
-export function runExpedition(rng: Rng, zone: Zone, members: readonly { stats: Stats; family: FamilyId }[], guildLevel: number, gearId: number): ExpeditionResult {
+export function runExpedition(rng: Rng, zone: Zone, members: readonly Member[], guildLevel: number, gearId: number): ExpeditionResult {
   const chance = successChance(zone, members, guildLevel);
   const success = rng.chance(chance);
   const luck = members.reduce((sum, m) => sum + m.stats.luck, 0);

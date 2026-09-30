@@ -10,6 +10,17 @@ import { buildGame, createGameServer } from "../../../scripts/dev-game.mjs";
 import { installFixture } from "../../../scripts/browser-fixture.mjs";
 import { FAMILIES_REGISTRY_ABI, GENERATION_SPRITE_MANIFEST } from "../../../dist/generation-sprites.js";
 
+// Generations contract: the game reads generation(id) for the tavern cast through Multicall3 (test fixture: a
+// deterministic generation from the token ID; every 7th ID fails, to exercise the "Gen ?" ×1 fallback).
+const COLLECTION = "0x14c49e6118f46525de9ab41a51cbaa3c6ebf181d";
+const GENERATION_ABI = parseAbi(["function generation(uint256 tokenId) view returns (uint8)"]);
+function generationCall(data) {
+  const { functionName, args } = decodeFunctionData({ abi: GENERATION_ABI, data });
+  assert.equal(functionName, "generation", "Only generation(id) is read from the collection in a batch");
+  reads.generation++;
+  if (args[0] % 7n === 0n) return null;
+  return encodeFunctionResult({ abi: GENERATION_ABI, functionName, result: 1 + Number(args[0] % 6n) });
+}
 const MULTICALL = parseAbi([
   "struct Call3 { address target; bool allowFailure; bytes callData; }",
   "struct Result { bool success; bytes returnData; }",
@@ -28,7 +39,7 @@ function registry(data) {
   else throw new Error(`Unexpected artwork read ${functionName}`);
   return encodeFunctionResult({ abi: FAMILIES_REGISTRY_ABI, functionName, result });
 }
-const reads = { multicall: 0, registry: 0 };
+const reads = { multicall: 0, registry: 0, generation: 0 };
 function artworkCall(call) {
   const to = call.to.toLowerCase();
   if (to === GENERATION_SPRITE_MANIFEST.registry.toLowerCase()) { reads.registry++; return registry(call.data); }
@@ -36,7 +47,8 @@ function artworkCall(call) {
     reads.multicall++;
     const { args } = decodeFunctionData({ abi: MULTICALL, data: call.data });
     const out = args[0].map(c => {
-      assert.equal(c.target.toLowerCase(), GENERATION_SPRITE_MANIFEST.registry.toLowerCase(), "Only the artwork registry is read");
+      if (c.target.toLowerCase() === COLLECTION) { const data = generationCall(c.callData); return data ? { success: true, returnData: data } : { success: false, returnData: "0x" }; }
+      assert.equal(c.target.toLowerCase(), GENERATION_SPRITE_MANIFEST.registry.toLowerCase(), "Only the artwork registry and generation(id) are read");
       return { success: true, returnData: registry(c.callData) };
     });
     return encodeFunctionResult({ abi: MULTICALL, functionName: "aggregate3", result: out });
@@ -69,11 +81,16 @@ try {
     await game.getByRole("tab", { name: /^Guild/ }).waitFor({ timeout: 20000 });
     await page.waitForTimeout(3500);
     await shot("guild");
+    // Fixture: #7730 is Gen 1, so the leader shows the Legendary badge and its fee is ×3.
+    await game.locator(".fg-me .fg-tier").getByText("GEN 1 · LEGENDARY ×3").waitFor();
     await game.getByRole("button", { name: "Help" }).click();
     await game.getByText(/A diagram there shows where every RF goes/).waitFor();
     await shot("help");
     await game.getByRole("button", { name: "Close How Friend Guild works" }).click();
     await game.getByRole("tab", { name: /^Tavern/ }).click();
+    const badges = await game.locator(".fg-merc .fg-tier").allTextContents();
+    assert.equal(badges.length, await game.locator(".fg-merc").count(), "every mercenary card has a tier badge");
+    assert.ok(badges.every(text => /^GEN (\d · [A-Z]+ ×[\d.]+|\? · ×1)$/.test(text)), badges.join(" | "));
     await game.getByRole("button", { name: /^Hire · / }).first().click();
     await game.getByRole("button", { name: /^Hire · / }).first().click();
     await shot("tavern");
@@ -103,6 +120,7 @@ try {
     assert.deepEqual([...new Set([...errors, ...fixture.errors])], [], `${view.name}: browser errors`);
     await context.close();
   }
+  assert.ok(reads.generation > 0, "generations were read through Multicall3");
   console.log("reads", reads);
 } catch (e) { failures.push(e); console.error(e); }
 finally { await browser.close(); server.closeAllConnections(); server.close(); await build.close(); await rm(temporary, { recursive: true, force: true }); }

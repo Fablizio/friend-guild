@@ -6,15 +6,15 @@ import { GameMenu } from "@rarefriends/friendsdk/frame";
 import { createFriendReader, type GenerationSprites } from "@rarefriends/friendsdk/sprites";
 import "@rarefriends/friendsdk/frame.css";
 import "./style.css";
-import { loadRoster, type Roster } from "./engine/roster";
+import { loadRoster, readGeneration, type Roster } from "./engine/roster";
 import { createRng, randomSeed } from "./engine/rng";
 import { Audio } from "./engine/audio";
 import { frameCanvas } from "./engine/sprites";
 import { FAMILY_NAMES, THEMES, type FamilyId } from "./engine/themes";
 import {
   CRAFT, DEMAND_HALF_LIFE_S, FAMILY_TRAIT, GEAR_NAMES, GEAR_SLOTS, MAX_GUILD_LEVEL, SIM_GUILDS, SPLIT, START_RF, STAT_KEYS, STAT_LABEL, TEAM_SIZE,
-  baseFeeOf, emptyLedger, favoredFor, feeOf, makeMerc, mercFee, ratingOf, record, round1, runExpedition, splitFee, statsFor, successChance, upgradeCost,
-  type ExpeditionResult, type Gear, type Ledger, type Merc, type Stats, type StatKey, type Zone,
+  emptyLedger, favoredFor, feeOf, makeMerc, mercFee, powerMult, ratingOf, record, round1, runExpedition, splitFee, statsFor, successChance, tierFeeOf,
+  tierLabel, tierOf, upgradeCost, type ExpeditionResult, type Gear, type GenTier, type Ledger, type Merc, type Stats, type StatKey, type Zone,
 } from "./engine/guild";
 import { DEFAULT_PARAMS, SCENARIOS, runEconomy, scenarioParams, summarize, type EconParams, type EconRun, type ScenarioId } from "./engine/econ";
 import { SCENE_H, SCENE_W, drawLineChart, drawScene } from "./engine/scene";
@@ -38,6 +38,13 @@ function Portrait({ sprites, scale = 3, halo = "#ffffff", label }: { sprites: Ge
     ctx.drawImage(frameCanvas(sprites.clips.idle[sprites.familyId === 6 ? "right" : "down"][0], scale, "#000000", halo), 0, 0);
   }, [sprites, scale, halo]);
   return <canvas ref={ref} width={18 * scale} height={18 * scale} className="fg-portrait" role="img" aria-label={label} />;
+}
+
+/** "GEN 1 · LEGENDARY ×3": the Friend's generation tier, which sets its fee (and, more gently, its power). */
+function TierBadge({ tier }: { tier: GenTier }) {
+  const power = Math.round((powerMult(tier.mult) - 1) * 100);
+  return <span className={`fg-tier g${tier.gen === null ? "x" : Math.min(6, tier.gen)}`}
+    title={tier.gen === null ? "Generation unknown: priced ×1" : `Generation ${tier.gen}: fee ×${tier.mult}${power ? `, expedition power +${power}%` : ""}`}>{tierLabel(tier)}</span>;
 }
 
 function StatBars({ stats, bonus }: { stats: Stats; bonus?: Partial<Stats> }) {
@@ -95,6 +102,7 @@ export default function FriendGuild({ friendId, client, paused }: GameComponentP
   const [status, setStatus] = useState("Verifying your Friend and opening the guild hall…");
   const [revision, setRevision] = useState(0);
   const [player, setPlayer] = useState<GenerationSprites | null>(null);
+  const [myGen, setMyGen] = useState<number | null>(null);
   const [roster, setRoster] = useState<Roster | null>(null);
   const [tab, setTab] = useState<Tab>("guild");
   const [menu, setMenu] = useState<"settings" | "help" | null>(null);
@@ -124,8 +132,8 @@ export default function FriendGuild({ friendId, client, paused }: GameComponentP
   const [econRun, setEconRun] = useState<EconRun | null>(null);
   const econ = econRun?.result ?? null;
   const [econBusy, setEconBusy] = useState(false);
-  const live = useRef({ paused, menu, listed, me, mercs, reducedMotion });
-  live.current = { paused, menu, listed, me, mercs, reducedMotion };
+  const live = useRef({ paused, menu, listed, me, mercs, reducedMotion, myMult: 1 });
+  live.current = { paused, menu, listed, me, mercs, reducedMotion, myMult: tierOf(myGen).mult };
 
   useEffect(() => {
     const motion = window.matchMedia("(prefers-reduced-motion: reduce)");
@@ -146,9 +154,11 @@ export default function FriendGuild({ friendId, client, paused }: GameComponentP
       if (cancelled) return;
       setPlayer(sprites);
       setStatus("Filling the tavern with real Friends from Robinhood Chain…");
-      const cast = await loadRoster(createRng(randomSeed()), friendId, null, 4);
+      // The leader's generation is best effort (null = ×1) and read alongside the cast, never blocking it.
+      const [cast, generation] = await Promise.all([loadRoster(createRng(randomSeed()), friendId, null, 4), readGeneration(friendId)]);
       if (cancelled) return;
-      const pool = cast.floors.flatMap(floor => [...floor.regulars, floor.boss]).map(makeMerc);
+      setMyGen(generation);
+      const pool = cast.floors.flatMap(floor => [...floor.regulars, floor.boss]).map(sprites => makeMerc(sprites, cast.generations.get(sprites.tokenId) ?? null));
       const rng = rngRef.current;
       setRoster(cast); setMercs(pool);
       setBoard(rng.shuffle(pool.map((_, i) => i)).slice(0, 8));
@@ -170,7 +180,8 @@ export default function FriendGuild({ friendId, client, paused }: GameComponentP
   }, [gear, equipped]);
   const myTotal = useMemo(() => myStats ? Object.fromEntries(STAT_KEYS.map(k => [k, myStats[k] + (bonus[k] ?? 0)])) as Stats : null, [myStats, bonus]);
   const myRating = myTotal ? ratingOf(myTotal) : 0;
-  const myFee = feeOf(baseFeeOf(myRating), me.demand);
+  const myTier = tierOf(myGen);
+  const myFee = feeOf(tierFeeOf(myRating, myTier.mult), me.demand);
   const family = (player?.familyId ?? 0) as FamilyId;
 
   const zones: Zone[] = useMemo(() => roster ? roster.floors.map((floor, i) => ({
@@ -178,9 +189,9 @@ export default function FriendGuild({ friendId, client, paused }: GameComponentP
   })) : [], [roster]);
   const zone = zones[zoneIndex] ?? null;
   const team = useMemo(() => [
-    ...(myTotal ? [{ stats: myTotal, family }] : []),
-    ...hired.map(i => mercs[i]).filter(Boolean).map(m => ({ stats: m.stats, family: m.family })),
-  ], [myTotal, family, hired, mercs]);
+    ...(myTotal ? [{ stats: myTotal, family, mult: myTier.mult }] : []),
+    ...hired.map(i => mercs[i]).filter(Boolean).map(m => ({ stats: m.stats, family: m.family, mult: m.tier.mult })),
+  ], [myTotal, family, myTier.mult, hired, mercs]);
   const chance = zone ? successChance(zone, team, level) : 0;
 
   const pushFeed = useCallback((text: string, you = false) => setFeed(items => [{ key: performance.now() + Math.random(), text, you }, ...items].slice(0, 7)), []);
@@ -202,11 +213,12 @@ export default function FriendGuild({ friendId, client, paused }: GameComponentP
         pushFeed(`${guild} hired Friend #${merc.id} for ${rf(fee)} · ${rf(part.owner)} to its wallet · ${rf(part.burn)} burned`);
       }
       if (state.listed) {
-        // Simulated guilds weigh value for money: an overpriced Friend gets hired less.
+        // Simulated guilds weigh value for money against the tier's price: an overpriced Friend gets hired less,
+        // while a rarer Friend is hired as often as a common one at its tier's fair price, and each hire pays ×mult.
         const stats = myTotalRef.current, rating = stats ? ratingOf(stats) : 20;
-        const fee = feeOf(baseFeeOf(rating), state.me.demand);
+        const fee = feeOf(tierFeeOf(rating, state.myMult), state.me.demand);
         // About one hire every 30 s at a fair price in the demo clock; overpricing cuts it sharply.
-        const value = (rating / fee) / 3.6;
+        const value = (rating * state.myMult / fee) / 3.6;
         const p = Math.max(0.005, Math.min(0.12, 0.05 * value ** 3));
         if (rng.chance(p)) {
           const part = splitFee(fee), guild = rng.pick(SIM_GUILDS);
@@ -346,8 +358,9 @@ export default function FriendGuild({ friendId, client, paused }: GameComponentP
             <Portrait sprites={player} scale={5} label={`Your Friend number ${String(friendId)}`} />
             <div>
               <h2>Friend #{String(friendId)}</h2>
+              <p><TierBadge tier={myTier} /></p>
               <p>{player.familyName} · {FAMILY_TRAIT[family]} · Guild master · level {level}</p>
-              <p>Rating <b>{myRating}</b> · hire fee <b>{rf(myFee)}</b></p>
+              <p>Rating <b>{myRating}</b> · hire fee <b>{rf(myFee)}</b>{myTier.mult > 1 ? ` (×${myTier.mult} for Gen ${myTier.gen})` : ""}</p>
             </div>
           </div>
           <StatBars stats={myStats!} bonus={bonus} />
@@ -357,7 +370,7 @@ export default function FriendGuild({ friendId, client, paused }: GameComponentP
             <div><small>Times hired</small><b>{me.hires}</b></div>
             <div><small>Demand</small><b>{me.demand < 0.5 ? "calm" : `+${Math.round(((1.05 ** me.demand) - 1) * 100)}%`}</b></div>
           </div>
-          <p className="fg-small">{SPLIT.owner}% of every fee paid for your Friend goes to its own wallet. Simulated guilds hire more when your rating is worth the fee.</p>
+          <p className="fg-small">{SPLIT.owner}% of every fee paid for your Friend goes to its own wallet. Generation sets the value: rarer Friends charge more per hire (Gen 1 ×3 … Gen 6 ×1). Simulated guilds hire more when your rating is worth the fee.</p>
         </div>
         <div className="fg-col">
           <div className="fg-card">
@@ -374,7 +387,7 @@ export default function FriendGuild({ friendId, client, paused }: GameComponentP
 
       {tab === "tavern" && <>
         <div className="fg-bar">
-          <p>Hire up to {TEAM_SIZE} Friends for your next expedition. Every fee: <b>{SPLIT.owner}% → the Friend's wallet</b> · <b className="burn">{SPLIT.burn}% burned</b> · {SPLIT.season}% season fund. Prices rise +5% per recent hire.</p>
+          <p>Hire up to {TEAM_SIZE} Friends for your next expedition. Every fee: <b>{SPLIT.owner}% → the Friend's wallet</b> · <b className="burn">{SPLIT.burn}% burned</b> · {SPLIT.season}% season fund. Prices rise +5% per recent hire. Generation sets the value: Gen 1 costs ×3 for +50% expedition power.</p>
           <button type="button" disabled={paused} onClick={refreshBoard}>Refresh board</button>
         </div>
         <div className="fg-mercs">
@@ -383,7 +396,7 @@ export default function FriendGuild({ friendId, client, paused }: GameComponentP
             return <div key={String(m.id)} className={`fg-card fg-merc${taken ? " taken" : ""}`} style={{ borderColor: THEMES[m.family].accent }}>
               <div className="fg-row">
                 <Portrait sprites={m.sprites} scale={3} halo={THEMES[m.family].accent} label={`Friend number ${m.id}`} />
-                <div><strong>#{String(m.id)}</strong><span>{FAMILY_NAMES[m.family]} · {FAMILY_TRAIT[m.family]}</span>{favored && <span className="fg-fav">★ favoured in {THEMES[zone!.family].floorName}</span>}</div>
+                <div><strong>#{String(m.id)}</strong><TierBadge tier={m.tier} /><span>{FAMILY_NAMES[m.family]} · {FAMILY_TRAIT[m.family]}</span>{favored && <span className="fg-fav">★ favoured in {THEMES[zone!.family].floorName}</span>}</div>
               </div>
               <StatBars stats={m.stats} />
               <div className="fg-price"><b>{rf(fee)}</b>{m.demand >= 0.5 && <span className="up">▲ {Math.round(((1.05 ** m.demand) - 1) * 100)}%</span>}<small>earned {rf(m.earned)}</small></div>
@@ -490,6 +503,7 @@ export default function FriendGuild({ friendId, client, paused }: GameComponentP
             <div><small>RF to Friend owners</small><b>{Math.round(econ.totals.toOwners).toLocaleString("en-US")}</b></div>
             <div><small>Avg listed Friend earns</small><b>{round1(econ.totals.perFriendPerDay)} RF/day</b><small>players spend {round1(econ.totals.spendPerPlayerDay)} RF/day</small></div>
             <div><small>Active players</small><b>{econ.totals.playersStart.toLocaleString("en-US")} → {econ.totals.playersEnd.toLocaleString("en-US")}</b></div>
+            <div><small>Gen 1 vs Gen 6 Friend earns</small><b>{round1(econ.totals.perFriendDayByGen[1] ?? 0)} vs {round1(econ.totals.perFriendDayByGen[6] ?? 0)}</b><small>RF/day (generation sets the value)</small></div>
             <div><small>Top 10% of Friends' share</small><b>{Math.round((econ.days.at(-1)?.top10Share ?? 0) * 100)}%</b></div>
             <div><small>RF minted by the game</small><b>0 {econ.conserved ? "✓" : "✗"}</b></div>
           </div>
@@ -517,6 +531,7 @@ export default function FriendGuild({ friendId, client, paused }: GameComponentP
         <li><b>Your Friend runs a guild.</b> Hire up to {TEAM_SIZE} real Friends in the Tavern, then send them on an Expedition with yours.</li>
         <li><b>Every hire pays the hired Friend.</b> {SPLIT.owner}% of the fee goes to that Friend's own wallet, {SPLIT.burn}% is burned, and {SPLIT.season}% goes to the weekly season fund.</li>
         <li><b>List your Friend</b> and other guilds hire it too. Its fee follows its stats and rises with demand.</li>
+        <li><b>Generation sets the value.</b> A Friend's fee is multiplied by its tier: Gen 1 Legendary ×3, Gen 2 Epic ×2, Gen 3 Rare ×1.5, Gen 4 Uncommon ×1.25, Gen 5 Common ×1.1, Gen 6+ ×1. Expedition power grows by a quarter of that (Gen 1: +50%).</li>
         <li><b>Expeditions never create RF.</b> They bring Shards, fame and gear. Shards plus RF buy upgrades and gear in the Workshop, and that RF is burned.</li>
         <li><b>Economy tab:</b> simulate 30 days of the whole economy, try scenario presets (bear market, hype, whales, bot attack) and other parameters. A diagram there shows where every RF goes.</li>
       </ul>

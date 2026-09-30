@@ -5,6 +5,7 @@
  * Invariant: every RF spent ends up with a Friend owner, burned, or in the season fund. The model never mints RF.
  */
 import { createRng } from "./rng";
+import { powerMult, tierOf } from "./guild";
 
 export type EconParams = {
   players: number; days: number; expeditionsPerDay: number;
@@ -29,6 +30,12 @@ export const DEFAULT_PARAMS: EconParams = {
 };
 /** Listed Friends per real player (the rest of the players don't list theirs). */
 export const LISTED_RATIO = 0.8;
+/**
+ * ASSUMED generation mix of listed Friends, index = generation (1 = rarest). Skewed toward Gen 5–6, the way the
+ * market prices them (Gen 1 is the scarcest and priciest). Each Friend's fee is multiplied by its tier (Gen 1 ×3 …
+ * Gen 6 ×1, see GEN_TIERS in guild.ts).
+ */
+export const GEN_MIX: readonly number[] = [0, 0.01, 0.03, 0.06, 0.12, 0.28, 0.50];
 
 export type EconDay = {
   day: number; players: number; listed: number; hires: number;
@@ -49,6 +56,8 @@ export type EconResult = {
     spent: number; burned: number; toOwners: number; season: number; seasonPaid: number; hires: number;
     playerDays: number; friendDays: number; perFriendPerDay: number; spendPerPlayerDay: number;
     whaleSpent: number; whaleHires: number; whaleDays: number; playersStart: number; playersEnd: number;
+    /** Owner income from real hires per listed Friend per day, by generation (index = generation; 0 unused). */
+    perFriendDayByGen: number[];
   };
   wash: WashStats;
 };
@@ -58,10 +67,16 @@ export function simulateEconomy(input: Partial<EconParams> = {}): EconResult {
   const rng = createRng(p.seed);
   const nBots = Math.round(p.players * p.botShare);
   // Friends: ratings follow the family/seed spread seen in game (roughly 16–32). Bots' own Friends are 0..nBots-1.
-  const rating: number[] = [], baseFee: number[] = [], demand: number[] = [], earned: number[] = [];
+  const rating: number[] = [], baseFee: number[] = [], demand: number[] = [], earned: number[] = [], gen: number[] = [], mult: number[] = [];
+  const drawGen = () => {
+    let x = rng.next();
+    for (let g = 1; g < GEN_MIX.length; g++) { x -= GEN_MIX[g]; if (x < 0) return g; }
+    return GEN_MIX.length - 1;
+  };
   const newFriend = () => {
     const r = Math.max(12, Math.min(36, Math.round(24 + (rng.next() + rng.next() + rng.next() - 1.5) * 8)));
-    rating.push(r); baseFee.push(1 + r * 0.22); demand.push(0); earned.push(0);
+    const g = drawGen(), m = tierOf(g).mult;
+    rating.push(r); gen.push(g); mult.push(m); baseFee.push((1 + r * 0.22) * m); demand.push(0); earned.push(0);
     return rating.length - 1;
   };
   for (let b = 0; b < nBots; b++) newFriend();
@@ -84,6 +99,8 @@ export function simulateEconomy(input: Partial<EconParams> = {}): EconResult {
   let burnedTotal = 0, ownersTotal = 0, seasonFund = 0, seasonPaid = 0, shardsSupply = 0, spentTotal = 0, seasonTotal = 0, hiresTotal = 0;
   let joinCarry = 0, churnCarry = 0, playerDays = 0, friendDays = 0, whaleSpent = 0, whaleHires = 0, whaleDays = 0;
   const playersStart = active.length;
+  // Owner income from real hires and listed Friend-days, per generation (index = generation).
+  const earnedByGen = GEN_MIX.map(() => 0), friendDaysByGen = GEN_MIX.map(() => 0);
   const wash: WashStats = { bots: nBots, hires: 0, spent: 0, returned: 0, burned: 0, season: 0, organic: 0, capHits: 0, organicPerBotFriendDay: 0, organicPerOtherFriendDay: 0 };
   const today: number[] = [];            // Friends hired by the current guild today (for the hire cap)
   const capped = (i: number) => {
@@ -119,16 +136,18 @@ export function simulateEconomy(input: Partial<EconParams> = {}): EconResult {
       const runs = Math.max(0, Math.round(p.expeditionsPerDay * (isWhale ? p.whaleMult : 1) + (rng.next() - 0.5) * 2));
       for (let run = 0; run < runs; run++) {
         for (let slot = 0; slot < 2; slot++) {
-          // A tavern board shows 8 Friends; players pick value for money, sometimes pure prestige.
+          // A tavern board shows 8 Friends; players pick value for money, sometimes pure prestige (power).
+          // Value is judged against the tier's fair price (ASSUMED): a Gen 1 at ×3 is as good a deal as a Gen 6 at ×1,
+          // so generation changes what each hire pays, not how often a Friend is hired. Demand pricing still applies.
           let best = -1, bestScore = -Infinity;
           for (let c = 0; c < 8; c++) {
             const i = at(rng.int(pool()));
-            const score = rng.chance(0.1) ? rating[i] : (rating[i] / fee(i)) * (0.8 + rng.next() * 0.4);
+            const score = rng.chance(0.1) ? rating[i] * powerMult(mult[i]) : (rating[i] * mult[i] / fee(i)) * (0.8 + rng.next() * 0.4);
             if (score > bestScore && !capped(i)) { bestScore = score; best = i; }
           }
           if (best < 0) continue;
           const f = fee(best), { owner } = pay(best, f);
-          earned[best] += owner; organicOwners += owner; today.push(best);
+          earned[best] += owner; organicOwners += owner; today.push(best); earnedByGen[gen[best]] += owner;
           if (best < nBots) wash.organic += owner;
           if (isWhale) { whaleSpent += f; whaleHires++; }
         }
@@ -161,6 +180,7 @@ export function simulateEconomy(input: Partial<EconParams> = {}): EconResult {
     if (day % 7 === 0) { seasonPaid += seasonFund; seasonFund = 0; } // weekly season payout to top guilds
     const listedNow = pool();
     playerDays += active.length; friendDays += listedNow;
+    for (let k = 0; k < listedNow; k++) friendDaysByGen[gen[at(k)]]++;
     const sorted = earned.slice().sort((a, b) => b - a);
     const top = sorted.slice(0, Math.max(1, Math.round(sorted.length * 0.1))).reduce((a, b) => a + b, 0);
     const organicTotal = sorted.reduce((a, b) => a + b, 0);
@@ -184,6 +204,7 @@ export function simulateEconomy(input: Partial<EconParams> = {}): EconResult {
       playerDays, friendDays, perFriendPerDay: organicOwners / Math.max(1, friendDays),
       spendPerPlayerDay: (spentTotal - wash.spent) / Math.max(1, playerDays),
       whaleSpent, whaleHires, whaleDays, playersStart, playersEnd: active.length,
+      perFriendDayByGen: earnedByGen.map((v, g) => v / Math.max(1, friendDaysByGen[g])),
     },
   };
 }

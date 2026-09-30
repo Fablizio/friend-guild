@@ -1,7 +1,9 @@
 // Economy model and fee-split checks. Run from the repo root: node games/friend-guild/tests/run-econ.mjs
 import assert from "node:assert/strict";
-import { DEFAULT_PARAMS, SCENARIOS, runEconomy, scenarioParams, simulateEconomy, summarize } from "../engine/econ";
-import { splitFee, feeOf, baseFeeOf, record, emptyLedger, successChance, favoredFor, type Zone } from "../engine/guild";
+import { DEFAULT_PARAMS, GEN_MIX, SCENARIOS, runEconomy, scenarioParams, simulateEconomy, summarize } from "../engine/econ";
+import {
+  splitFee, feeOf, baseFeeOf, record, emptyLedger, successChance, favoredFor, tierOf, tierFeeOf, tierLabel, powerMult, type Zone,
+} from "../engine/guild";
 
 let passed = 0;
 const test = (name: string, fn: () => void) => { fn(); passed++; console.log(`ok ${passed} - ${name}`); };
@@ -102,5 +104,33 @@ test("whales run more expeditions and spend a larger share than their headcount"
   const r = simulateEconomy(scenarioParams("whales", 1000)), t = r.totals;
   assert.ok(t.whaleDays > 0 && t.whaleSpent / t.spent > 2 * (t.whaleDays / t.playerDays));
   assert.ok(r.days[29].top10Share < 0.5);
+});
+test("generation sets the value: fees scale with tier, the split still conserves, Gen 1 earns 3× Gen 6 at equal demand", () => {
+  assert.deepEqual([1, 2, 3, 4, 5, 6, 7].map(g => tierOf(g).mult), [3, 2, 1.5, 1.25, 1.1, 1, 1]);
+  for (const unknown of [null, undefined, 0, -1, 1.5]) { assert.equal(tierOf(unknown).mult, 1); assert.equal(tierLabel(tierOf(unknown)), "GEN ? · ×1"); }
+  assert.equal(tierLabel(tierOf(1)), "GEN 1 · LEGENDARY ×3");
+  assert.equal(tierFeeOf(24, 1), baseFeeOf(24));
+  for (const rating of [16, 24, 32]) for (const demand of [0, 1, 4]) {
+    const gen1 = feeOf(tierFeeOf(rating, 3), demand), gen6 = feeOf(tierFeeOf(rating, 1), demand);
+    for (const f of [gen1, gen6]) { const s = splitFee(f); assert.ok(Math.abs(s.owner + s.burn + s.season - f) < 1e-9); }
+    const ratio = splitFee(gen1).owner / splitFee(gen6).owner;
+    assert.ok(Math.abs(ratio - 3) < 0.1, `Gen 1 wallet ${splitFee(gen1).owner} vs Gen 6 ${splitFee(gen6).owner}`);
+  }
+  // Power grows by a quarter of the fee premium: worth hiring, not mandatory.
+  assert.equal(powerMult(3), 1.5); assert.equal(powerMult(1), 1);
+  const zone: Zone = { family: 0, tier: 3, favored: favoredFor(0), req: 76, foes: [] };
+  const member = { stats: { power: 6, guard: 6, speed: 6, luck: 6 }, family: 1 as const };
+  const plain = successChance(zone, [member, member, member], 1), rare = successChance(zone, [member, { ...member, mult: 3 }, member], 1);
+  assert.ok(rare > plain && rare - plain < 0.2, `${plain} → ${rare}`);
+});
+test("the 30-day model with a generation mix conserves RF and pays Gen 1 wallets about 3× Gen 6", () => {
+  assert.ok(Math.abs(GEN_MIX.reduce((a, b) => a + b, 0) - 1) < 1e-9 && GEN_MIX[6] > GEN_MIX[1]);
+  for (const players of [300, 1000]) {
+    const r = simulateEconomy({ players });
+    assert.ok(conserves(r));
+    const by = r.totals.perFriendDayByGen, ratio = by[1] / by[6];
+    assert.ok(ratio > 2.5 && ratio < 4.5, `Gen 1 / Gen 6 = ${ratio}`);
+    assert.ok(by[1] > by[2] && by[2] > by[3] && by[3] > by[6], by.join(", "));
+  }
 });
 console.log(`# pass ${passed}`);

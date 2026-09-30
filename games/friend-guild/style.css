@@ -92,3 +92,12 @@ html, body, #root { margin: 0; height: 100%; background: #0b0b0c; overflow: hidd
   .fg-tiles { grid-template-columns: repeat(2, 1fr); }
   .fg-logo.small { display: none; }
 }
+/* Generation tier badges: generation sets the value. Dark text on light fills stays readable at small sizes. */
+.fg-tier, .fg-merc .fg-tier { display: inline-block; align-self: flex-start; margin: .15em 0; padding: .05em .45em; font-size: .72em; font-weight: bold; letter-spacing: .04em; white-space: nowrap; color: #000; background: #9a9a92; border-radius: 2px; }
+.fg-tier.g1, .fg-merc .fg-tier.g1 { background: #ffc83d; color: #000; }
+.fg-tier.g2, .fg-merc .fg-tier.g2 { background: #c9a7ff; color: #000; }
+.fg-tier.g3, .fg-merc .fg-tier.g3 { background: #6fd0ff; color: #000; }
+.fg-tier.g4, .fg-merc .fg-tier.g4 { background: #8be28b; color: #000; }
+.fg-tier.g5, .fg-merc .fg-tier.g5 { background: #d8d8d0; color: #000; }
+.fg-tier.g6, .fg-merc .fg-tier.g6 { background: #9a9a92; color: #000; }
+.fg-tier.gx, .fg-merc .fg-tier.gx { background: transparent; color: #bdbdbd; border: 1px dashed #777; }
