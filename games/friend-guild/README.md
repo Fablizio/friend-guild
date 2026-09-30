@@ -1,8 +1,8 @@
 # Friend Guild
 
-![Friend Guild demo: tavern, hiring two Friends, an expedition, then the economy simulator's Bot attack scenario](media/demo.gif)
+![Friend Guild demo: tavern, hiring two Friends, an animated expedition fight, then the economy simulator's Bot attack scenario](media/demo.gif)
 
-<sub>Demo recorded with the SDK test fixtures (mock wallet and sample artwork), so the tavern Friends share two sample sprites. The public preview reads real Friends. The GIF predates the generation tier badges.</sub>
+<sub>Demo recorded with the SDK test fixtures (mock wallet and sample artwork), so the tavern Friends share two sample sprites. The public preview reads real Friends. The GIF has no sound; the game has a chiptune soundtrack.</sub>
 
 Builder: Fablizio · [GitHub @Fablizio](https://github.com/Fablizio) · [X @FabrizioCottone](https://x.com/FabrizioCottone) · [Telegram @Fablizio](https://t.me/Fablizio) · FriendSDK **v0.1.4** · Rare Friends Vibeathon (**Economy Potential**)
 
@@ -11,7 +11,8 @@ hires real Friends as mercenaries for expeditions. **Every fee pays the hired Fr
 and funds the weekly season (10%).** Expeditions never create RF. They bring Shards, a soft currency that is
 spent, together with RF (burned), on upgrades and gear. An in-game **economy simulator** runs the whole economy
 for 30 days with adjustable parameters. **Generation sets the value:** a Gen 1 mercenary costs (and pays its
-wallet) 3× a Gen 6. **All RF, balances, hires, other guilds and earnings are simulated.**
+wallet) 3× a Gen 6. Presentation: a chiptune soundtrack (tavern theme, family expedition themes, jingles) and
+animated fights. **All RF, balances, hires, other guilds and earnings are simulated.**
 Full design: [ECONOMY.md](ECONOMY.md).
 
 ## Generation sets the value
@@ -80,6 +81,8 @@ Tap or click. Everything is also reachable with the keyboard (Tab / Enter).
 - **Expedition:** pick one of four family zones (tier 1–4). Each zone favours two counter-families (+7% each).
   - Success chance comes from team power, guild level and affinity, and is shown before launch.
   - The run plays out as a short animation with four encounters against real Friends (12–24 s demo speed, **Skip** available).
+  - Each encounter is a small animated fight: HP bars over your team and the foe, members taking turns (Mask, Asymmetry, Hoverer and Sparkling shoot; the other families close in and strike), the foe answering, white hit flashes, knockback, floating damage numbers and a light shake on big hits. A beaten foe bursts into pixels and leaves a chest that counts up its shards; a lost fight knocks your team down.
+  - The fight is a replay of the already-decided result: the outcome is rolled first, and hits, damage numbers and HP are derived from it deterministically, so the animation always matches the reward.
   - Rewards: Shards, fame and sometimes gear. **Never RF.**
 - **Workshop:**
   - Guild upgrade: level L costs ◆ 40·L + 8·L RF, and gives +3% success per level, up to level 5.
@@ -88,7 +91,13 @@ Tap or click. Everything is also reachable with the keyboard (Tab / Enter).
   - A table shows where your session's RF went.
 - **Economy:** the 30-day agent-based simulator with scenario presets (see below). A small diagram shows where RF goes.
 
-Settings include **Mute** and **Reduce motion** (still frames, no scrolling). Everything pauses while the runtime's
+**Music:** a chiptune soundtrack synthesized with WebAudio (no audio files): a calm tavern waltz on the guild,
+tavern, workshop and economy screens, the zone family's theme during an expedition (one theme per family), a short
+victory jingle on success and a defeat sting on failure. Fights add soft hit and attack sounds. Audio starts only
+after your first tap or key press and pauses when the tab is hidden, the game loses focus or the runtime pauses.
+
+Settings include **Mute**, a separate **Music** toggle (off while muted) and **Reduce motion** (still frames, no
+scrolling, lunges, knockback or shake; HP bars and damage numbers stay). Everything pauses while the runtime's
 menus are open.
 
 ## Economy terms (simulated)
@@ -131,8 +140,9 @@ Run from the repository root:
   - The hire cap limits wash volume (cap 1 < cap 3 < half of no cap).
   - Whales spend more than their headcount share; a higher burn share burns more; the top 10% of Friends earn well under half; Shard supply stays bounded.
   - Generation sets the value: fees scale with the tier, every split still sums to the fee, a Gen 1's wallet gets 3× a Gen 6's at equal demand, and power grows only moderately. The model with a generation mix conserves RF and pays Gen 1 wallets about 3× Gen 6.
-- `CHROME_PATH=<chromium> node games/friend-guild/tests/browser.mjs`: the real SDK runtime in headless Chromium with SDK mock fixtures (extended for the artwork registry and for `generation(id)` inside Multicall3, deterministic from the token ID with every 7th read failing to exercise the ×1 fallback). It walks guild → hire two → launch → skip → result → workshop → economy → Bot attack and Hype presets on desktop and phone layouts, with no browser errors.
-- `node games/friend-guild/tests/demo-gif.mjs` records `media/demo.gif` with the same fixtures (needs ffmpeg).
+- `CHROME_PATH=<chromium> node games/friend-guild/tests/browser.mjs`: the real SDK runtime in headless Chromium with SDK mock fixtures (extended for the artwork registry and for `generation(id)` inside Multicall3, deterministic from the token ID with every 7th read failing to exercise the ×1 fallback). It walks guild → settings (the Music toggle turns off and on, and reads off while muted) → hire two → launch → mid-fight screenshots → result → workshop → economy → Bot attack and Hype presets on desktop and phone layouts, with no browser errors. On desktop the expedition plays to its own end screen; the phone layouts use Skip.
+- `CHROME_PATH=<chromium> node games/friend-guild/tests/run-scene.mjs` renders fight frames (a won and a lost run, plus reduced motion) to `.artifacts/visual/`.
+- `node games/friend-guild/tests/demo-gif.mjs` records `media/demo.gif` with the same fixtures, including the generation reads (needs ffmpeg).
 - Known issue: the stock `npx friendsdk test` fixture only answers artwork reads for sample Friend #7730, so it rejects the tavern's roster reads by design.
 
 ## Limitations
@@ -148,5 +158,5 @@ Run from the repository root:
 ## Credits
 
 Code and design by Fablizio (AI-assisted). Scenery is drawn in code. Character art: canonical Rare Friends Generations
-sprites via the FriendSDK sprite reader. Sounds come from the FriendSDK sound kit (see `NOTICE.md`). Shares
+sprites via the FriendSDK sprite reader. Music and fight sounds are synthesized in code; reward sounds come from the FriendSDK sound kit (see `NOTICE.md`). The music engine is shared with *The Binding of RareFriend*. Shares
 Friend-loading code with the builder's other entries, *The Binding of RareFriend* and *Daily Crypt*.

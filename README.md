@@ -1,11 +1,12 @@
 # Friend Guild
 
-![Friend Guild demo: tavern, hiring two Friends, an expedition, then the economy simulator's Bot attack scenario](games/friend-guild/media/demo.gif)
+![Friend Guild demo: tavern, hiring two Friends, an animated expedition fight, then the economy simulator's Bot attack scenario](games/friend-guild/media/demo.gif)
 
 **A guild-management game where Rare Friends work for each other. Hire real Friends as mercenaries: 70% of every
 fee goes to the hired Friend's own wallet, 20% is burned and 10% funds the season.** By [Fablizio](https://github.com/Fablizio).
 Rare Friends Vibeathon entry (Economy Potential) built on FriendSDK v0.1.4. All RF is simulated in this prototype.
 The in-game economy simulator runs 30 days with growth, churn and scenario presets (bear market, hype, whales, bot attack).
+Chiptune soundtrack (tavern theme, family expedition themes, jingles) and animated fights.
 
 - **Play:** https://fablizio.github.io/friend-guild/ (needs a wallet on Robinhood mainnet holding a hardwired Generations Friend)
 - **Game source, rules and controls:** [`games/friend-guild/`](games/friend-guild/README.md) · **Economy design:** [`ECONOMY.md`](games/friend-guild/ECONOMY.md)

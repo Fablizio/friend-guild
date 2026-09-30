@@ -87,6 +87,17 @@ try {
     await game.getByText(/A diagram there shows where every RF goes/).waitFor();
     await shot("help");
     await game.getByRole("button", { name: "Close How Friend Guild works" }).click();
+    // Settings: a separate Music toggle next to Mute (off, and locked, while muted).
+    await game.getByRole("button", { name: "Settings" }).click();
+    const music = game.getByRole("checkbox", { name: /^Music/ }), mute = game.getByRole("checkbox", { name: "Mute sound" });
+    assert.equal(await music.isChecked(), true, "music starts on");
+    await music.click(); assert.equal(await music.isChecked(), false, "music toggles off");
+    await music.click(); assert.equal(await music.isChecked(), true, "music toggles back on");
+    await mute.click();
+    assert.equal(await music.isChecked(), false, "music reads off while muted"); assert.equal(await music.isDisabled(), true, "music locked while muted");
+    await shot("settings");
+    await mute.click(); assert.equal(await music.isChecked(), true, "music back after unmute");
+    await game.getByRole("button", { name: "Close Settings" }).click();
     await game.getByRole("tab", { name: /^Tavern/ }).click();
     const badges = await game.locator(".fg-merc .fg-tier").allTextContents();
     assert.equal(badges.length, await game.locator(".fg-merc").count(), "every mercenary card has a tier badge");
@@ -96,10 +107,19 @@ try {
     await shot("tavern");
     await game.getByRole("tab", { name: /^Expedition/ }).click();
     await game.getByRole("button", { name: "Launch expedition" }).click();
-    await page.waitForTimeout(4200);
+    // Mid-fight frames of the first encounter (tier 1 zone: a 15 s run).
+    await page.waitForTimeout(1900);
     await shot("expedition");
-    await game.getByRole("button", { name: "Skip" }).click();
-    await game.getByRole("button", { name: "Back to zones" }).waitFor();
+    await page.waitForTimeout(900);
+    await shot("expedition-fight");
+    if (view.name === "desktop") {
+      // One run plays to its own end screen (no Skip) with no browser errors.
+      await game.getByRole("button", { name: "Back to zones" }).waitFor({ timeout: 30000 });
+      assert.deepEqual([...new Set([...errors, ...fixture.errors])], [], `${view.name}: browser errors during the expedition`);
+    } else {
+      await game.getByRole("button", { name: "Skip" }).click();
+      await game.getByRole("button", { name: "Back to zones" }).waitFor();
+    }
     await shot("result");
     await game.getByRole("tab", { name: /^Workshop/ }).click();
     await shot("workshop");

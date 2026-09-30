@@ -12,6 +12,16 @@ import { buildGame, createGameServer } from "../../../scripts/dev-game.mjs";
 import { installFixture } from "../../../scripts/browser-fixture.mjs";
 import { FAMILIES_REGISTRY_ABI, GENERATION_SPRITE_MANIFEST } from "../../../dist/generation-sprites.js";
 
+// Generations contract: generation(id) for the tavern cast, read through Multicall3 (test fixture: a deterministic
+// generation from the token ID; every 7th ID fails, showing the "Gen ?" ×1 fallback), as in browser.mjs.
+const COLLECTION = "0x14c49e6118f46525de9ab41a51cbaa3c6ebf181d";
+const GENERATION_ABI = parseAbi(["function generation(uint256 tokenId) view returns (uint8)"]);
+function generationCall(data) {
+  const { functionName, args } = decodeFunctionData({ abi: GENERATION_ABI, data });
+  assert.equal(functionName, "generation", "Only generation(id) is read from the collection in a batch");
+  if (args[0] % 7n === 0n) return null;
+  return encodeFunctionResult({ abi: GENERATION_ABI, functionName, result: 1 + Number(args[0] % 6n) });
+}
 const MULTICALL = parseAbi([
   "struct Call3 { address target; bool allowFailure; bytes callData; }",
   "struct Result { bool success; bytes returnData; }",
@@ -38,7 +48,8 @@ function artworkCall(call) {
     reads.multicall++;
     const { args } = decodeFunctionData({ abi: MULTICALL, data: call.data });
     const out = args[0].map(c => {
-      assert.equal(c.target.toLowerCase(), GENERATION_SPRITE_MANIFEST.registry.toLowerCase(), "Only the artwork registry is read");
+      if (c.target.toLowerCase() === COLLECTION) { const data = generationCall(c.callData); return data ? { success: true, returnData: data } : { success: false, returnData: "0x" }; }
+      assert.equal(c.target.toLowerCase(), GENERATION_SPRITE_MANIFEST.registry.toLowerCase(), "Only the artwork registry and generation(id) are read");
       return { success: true, returnData: registry(c.callData) };
     });
     return encodeFunctionResult({ abi: MULTICALL, functionName: "aggregate3", result: out });
@@ -78,7 +89,7 @@ try {
   await game.getByRole("tab", { name: /^Expedition/ }).click();
   await page.waitForTimeout(900);
   await game.getByRole("button", { name: "Launch expedition" }).click();
-  await page.waitForTimeout(3600);
+  await page.waitForTimeout(4300); // the first encounter's fight, the foe's burst and the loot chest
   await game.getByRole("button", { name: "Skip" }).click();
   await page.waitForTimeout(1100);
   await game.getByRole("tab", { name: /^Economy/ }).click();

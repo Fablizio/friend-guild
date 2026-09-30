@@ -8,7 +8,8 @@ import "@rarefriends/friendsdk/frame.css";
 import "./style.css";
 import { loadRoster, readGeneration, type Roster } from "./engine/roster";
 import { createRng, randomSeed } from "./engine/rng";
-import { Audio } from "./engine/audio";
+import { Audio, type Sfx } from "./engine/audio";
+import type { MusicTheme } from "./engine/music";
 import { frameCanvas } from "./engine/sprites";
 import { FAMILY_NAMES, THEMES, type FamilyId } from "./engine/themes";
 import {
@@ -17,7 +18,7 @@ import {
   tierLabel, tierOf, upgradeCost, type ExpeditionResult, type Gear, type GenTier, type Ledger, type Merc, type Stats, type StatKey, type Zone,
 } from "./engine/guild";
 import { DEFAULT_PARAMS, SCENARIOS, runEconomy, scenarioParams, summarize, type EconParams, type EconRun, type ScenarioId } from "./engine/econ";
-import { SCENE_H, SCENE_W, drawLineChart, drawScene } from "./engine/scene";
+import { SCENE_H, SCENE_W, drawLineChart, drawScene, sceneCues } from "./engine/scene";
 
 type Tab = "guild" | "tavern" | "expedition" | "workshop" | "economy";
 type Feed = { key: number; text: string; you?: boolean };
@@ -107,6 +108,10 @@ export default function FriendGuild({ friendId, client, paused }: GameComponentP
   const [tab, setTab] = useState<Tab>("guild");
   const [menu, setMenu] = useState<"settings" | "help" | null>(null);
   const [muted, setMuted] = useState(false);
+  const [musicOn, setMusicOn] = useState(true);
+  /** Music plays only while the game is visible and focused (and the runtime has not paused it). */
+  const [hidden, setHidden] = useState(() => typeof document !== "undefined" && document.hidden);
+  const [focused, setFocused] = useState(() => typeof document === "undefined" || document.hasFocus());
   const [reducedMotion, setReducedMotion] = useState(false);
   // Guild state (simulated, per session).
   const [balance, setBalance] = useState(START_RF);
@@ -142,6 +147,15 @@ export default function FriendGuild({ friendId, client, paused }: GameComponentP
     return () => { motion.removeEventListener("change", update); audio.current?.dispose(); audio.current = null; };
   }, []);
   useEffect(() => { audio.current?.setMuted(muted); }, [muted]);
+  useEffect(() => { audio.current?.setMusic(musicOn); }, [musicOn]);
+  useEffect(() => {
+    const visibility = () => { setHidden(document.hidden); audio.current?.setHidden(document.hidden); };
+    const focus = () => setFocused(true), blur = () => setFocused(false);
+    document.addEventListener("visibilitychange", visibility); window.addEventListener("focus", focus); window.addEventListener("blur", blur);
+    return () => { document.removeEventListener("visibilitychange", visibility); window.removeEventListener("focus", focus); window.removeEventListener("blur", blur); };
+  }, []);
+  /** Audio starts on the first user gesture (browsers keep it silent until then). */
+  const unlockAudio = useCallback(() => { setFocused(true); const a = audio.current; if (a) { a.wake(); void a.unlock(); } }, []);
   const sound = useCallback((cue: Parameters<Audio["cue"]>[0]) => { void audio.current?.unlock().then(() => audio.current?.cue(cue)); }, []);
 
   // Session, your Friend's artwork and a cast of real Friends for the tavern and the zones.
@@ -266,7 +280,9 @@ export default function FriendGuild({ friendId, client, paused }: GameComponentP
       if (result.gear) { setGear(list => [...list, result.gear!]); setNextGear(n => n + 1); }
       setHired([]);
       pushFeed(`Expedition to ${THEMES[result.zone.family].floorName}: ${result.success ? "success" : "failed"} · +${result.shards} shards${result.fame ? ` · +${result.fame} fame` : ""}${result.gear ? ` · found ${result.gear.name} +${result.gear.bonus}` : ""}`, true);
-      audio.current?.cue(result.success ? (result.gear ? "reveal-rare" : "reward") : "select");
+      // Victory jingle or defeat sting when music is on; the kit cue otherwise (and for found gear).
+      const jingled = audio.current?.jingle(result.success ? "win" : "lose") ?? false;
+      if (result.gear) audio.current?.cue("reveal-rare"); else if (!jingled) audio.current?.cue(result.success ? "reward" : "select");
       return { ...current, done: true };
     });
   }, [pushFeed]);
@@ -276,13 +292,15 @@ export default function FriendGuild({ friendId, client, paused }: GameComponentP
   const pausedAt = useRef<number | null>(null);
   useEffect(() => {
     if (!run || run.done) return;
-    let frame = 0;
+    let frame = 0, heard = 0;
+    const emit = (sfx: Sfx) => audio.current?.play(sfx);
     const loop = (now: number) => {
       const state = live.current, canvas = sceneRef.current, ctx = canvas?.getContext("2d");
       if (state.paused || state.menu || document.hidden) { if (pausedAt.current === null) pausedAt.current = now; frame = requestAnimationFrame(loop); return; }
       if (pausedAt.current !== null) { run.start += now - pausedAt.current; pausedAt.current = null; }
       const t = (now - run.start) / 1000;
       if (ctx) drawScene(ctx, run.result, run.team, t, state.reducedMotion);
+      sceneCues(run.result, run.team, heard, t, emit); heard = Math.max(heard, t);
       if (t >= run.result.duration) { finishRun(); return; }
       frame = requestAnimationFrame(loop);
     };
@@ -327,6 +345,10 @@ export default function FriendGuild({ friendId, client, paused }: GameComponentP
   const setParam = (patch: Partial<EconParams>) => { setEconParams(p => ({ ...p, ...patch })); setScenario("custom"); };
   useEffect(() => { if (tab === "economy" && !econ && !econBusy) runEcon(); });
 
+  // Soundtrack: the tavern theme on the guild screens, the zone family's theme during an expedition, silence on the result.
+  const musicTheme: MusicTheme | null = phase !== "ready" ? null : run ? (run.done ? null : run.result.zone.family) : "tavern";
+  useEffect(() => { audio.current?.theme(musicTheme, !paused && !hidden && focused); }, [musicTheme, paused, hidden, focused]);
+
   const board3 = [{ name: `Your guild`, fame, you: true }, ...rivals.map(r => ({ ...r, you: false }))].sort((a, b) => b.fame - a.fame);
 
   if (phase !== "ready" || !player || !myTotal || !roster) {
@@ -337,7 +359,7 @@ export default function FriendGuild({ friendId, client, paused }: GameComponentP
     </div></section>;
   }
 
-  return <section className="fg-game" aria-label="Friend Guild">
+  return <section className="fg-game" aria-label="Friend Guild" onPointerDownCapture={unlockAudio} onKeyDownCapture={unlockAudio}>
     <header className="fg-top">
       <h1 className="fg-logo small">FRIEND <em>GUILD</em></h1>
       <div className="fg-tabs" role="tablist" aria-label="Guild sections">
@@ -523,7 +545,8 @@ export default function FriendGuild({ friendId, client, paused }: GameComponentP
 
     {menu === "settings" && <GameMenu title="Settings" onClose={() => setMenu(null)}>
       <label><input type="checkbox" checked={muted} disabled={paused} onChange={e => setMuted(e.target.checked)} /> Mute sound</label>
-      <label><input type="checkbox" checked={reducedMotion} disabled={paused} onChange={e => setReducedMotion(e.target.checked)} /> Reduce motion (still frames, no scrolling)</label>
+      <label><input type="checkbox" checked={musicOn && !muted} disabled={paused || muted} onChange={e => setMusicOn(e.target.checked)} /> Music (chiptune)</label>
+      <label><input type="checkbox" checked={reducedMotion} disabled={paused} onChange={e => setReducedMotion(e.target.checked)} /> Reduce motion (no scrolling, lunges or shake)</label>
       <button type="button" className="rf-frame-primary" disabled={paused} onClick={() => setMenu(null)}>Back</button>
     </GameMenu>}
     {menu === "help" && <GameMenu title="How Friend Guild works" onClose={() => setMenu(null)}>
